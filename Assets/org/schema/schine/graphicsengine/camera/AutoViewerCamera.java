@@ -1,0 +1,122 @@
+/**
+ * <H1>Project R<H1>
+ * <p/>
+ * <p/>
+ * <H2>ViewerCamera</H2>
+ * <H3>org.schema.schine.graphicsengine.camera</H3>
+ * ViewerCamera.java
+ * <HR>
+ * Description goes here. If you see this message, please contact me and the
+ * description will be filled.<BR>
+ * <BR>
+ *
+ * @author Robin Promesberger (schema)
+ * @mail <A HREF="mailto:schemaxx@gmail.com">schemaxx@gmail.com</A>
+ * @site <A
+ * HREF="http://www.the-schema.com/">http://www.the-schema.com/</A>
+ * @project JnJ / VIR / Project R
+ * @homepage <A
+ * HREF="http://www.the-schema.com/JnJ">
+ * http://www.the-schema.com/JnJ</A>
+ * @copyright Copyright © 2004-2010 Robin Promesberger (schema)
+ * @licence Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or
+ * sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ * <p/>
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ * <p/>
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+ * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+package org.schema.schine.graphicsengine.camera;
+
+import javax.vecmath.Vector3f;
+
+import org.schema.schine.graphicsengine.camera.viewer.FixedViewer;
+import org.schema.schine.graphicsengine.core.GlUtil;
+import org.schema.schine.graphicsengine.core.Timer;
+import org.schema.schine.network.StateInterface;
+
+public class AutoViewerCamera extends Camera {
+
+	Vector3f dir = new Vector3f();
+	private Vector3f flyTo;
+
+	public AutoViewerCamera(StateInterface state, FixedViewer fViewable, Vector3f to, Vector3f dir) {
+		super(state, fViewable);
+		this.flyTo = to;
+		this.dir = new Vector3f(dir);
+		assert (dir.lengthSquared() != 0 && !Float.isNaN(dir.x));
+		getWorldTransform().setIdentity();
+	}
+
+	@Override
+	public void update(Timer timer, boolean server) {
+		if (timer.getDelta() <= 0) {
+			return;
+		}
+		if (flyTo != null) {
+			Vector3f projected = new Vector3f();
+			Vector3f dd = new Vector3f();
+			dd.sub(flyTo, getWorldTransform().origin);
+
+			if (dd.lengthSquared() == 0) {
+				dd.set(0, 0, 1);
+			}
+			Vector3f nDD = new Vector3f(dd);
+			nDD.normalize();
+			if (dir.lengthSquared() == 0) {
+				dir.set(0, 0, 1);
+			}
+			nDD.sub(dir);
+
+			if (nDD.lengthSquared() == 0) {
+				nDD.set(0, 0, 1);
+			}
+			if (nDD.length() > 0.1f) {
+				GlUtil.project(new Vector3f(dir), new Vector3f(dd), projected);
+				projected.normalize();
+				projected.scale((float) (timer.getDelta() * 0.35));
+				dir.add(projected);
+				dir.normalize();
+			}
+		}
+		Vector3f dirScaled = new Vector3f(dir);
+		dirScaled.scale(timer.getDelta() * 55);
+		((FixedViewer) getViewable()).getEntity().getWorldTransform().origin.add(dirScaled);
+
+		//		System.err.println("POS: "+getViewable().getPos());
+		Vector3f up = GlUtil.getUpVector(new Vector3f(), getWorldTransform());
+		assert (up.lengthSquared() > 0);
+		up.x += (0.05f);
+		up.y += (0.05f);
+		up.normalize();
+		Vector3f right = new Vector3f();
+
+		right.cross(dir, up);
+		right.normalize();
+
+		up.cross(right, dir);
+		up.normalize();
+
+		GlUtil.setForwardVector(dir, getWorldTransform());
+		GlUtil.setUpVector(up, getWorldTransform());
+		GlUtil.setRightVector(right, getWorldTransform());
+
+		assert (right.lengthSquared() > 0) : dir + ", " + up;
+		updateViewer(timer);
+	}
+
+}

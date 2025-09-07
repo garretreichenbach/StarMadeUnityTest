@@ -1,0 +1,19 @@
+package org.schema.game.common.data.element;
+
+public class ElementParserException extends RuntimeException {
+
+	/**
+	 * 
+	 */
+	private static final long serialVersionUID = 1L;
+
+	/**
+	 *
+	 */
+	
+
+	public ElementParserException(String string) {
+		super(string);
+	}
+
+}

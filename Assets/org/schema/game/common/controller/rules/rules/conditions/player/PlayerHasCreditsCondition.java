@@ -1,0 +1,72 @@
+package org.schema.game.common.controller.rules.rules.conditions.player;
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.Set;
+
+import org.schema.common.util.StringTools;
+import org.schema.common.util.linAlg.Vector3i;
+import org.schema.game.common.controller.SegmentController;
+import org.schema.game.common.controller.rules.RuleStateChange;
+import org.schema.game.common.controller.rules.rules.RuleValue;
+
+import org.schema.game.common.controller.rules.rules.conditions.ConditionTypes;
+import org.schema.game.common.data.player.PlayerState;
+import org.schema.game.common.data.world.RemoteSector;
+import org.schema.game.common.data.world.Sector;
+import org.schema.game.common.data.world.Sector.SectorMode;
+import org.schema.game.common.data.world.SimpleTransformableSendableObject.EntityType;
+import org.schema.schine.common.language.Lng;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+
+import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+
+public class PlayerHasCreditsCondition extends PlayerMoreLessCondition{
+
+	@RuleValue(tag = "Credits")
+	public long credits;
+	
+
+	
+	
+	
+	
+	
+	public PlayerHasCreditsCondition() {
+		super();
+	}
+
+	@Override
+	public long getTrigger() {
+		return TRIGGER_ON_PLAYER_CREDITS_CHANGED;
+	}
+
+	@Override
+	public ConditionTypes getType() {
+		return ConditionTypes.PLAYER_HAS_CREDITS;
+	}
+
+	@Override
+	protected boolean processCondition(short conditionIndex, RuleStateChange stateChange, PlayerState a, long trigger, boolean forceTrue) {
+		if(forceTrue) {
+			return true;
+		}
+		long cc = a.getCredits();
+		
+		return moreThan ? (cc > credits) : (cc <= credits);
+	}
+
+	@Override
+	public String getCountString() {
+		return String.valueOf(credits);
+	}
+
+	@Override
+	public String getQuantifierString() {
+		return Lng.str("%s Credits", credits);
+	}
+	
+}

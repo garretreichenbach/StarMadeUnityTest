@@ -1,0 +1,16 @@
+# API Key for XenForo
+
+import requests
+
+headers = {
+          'Content-type' : 'application/x-www-form-urlencoded',
+          'XF-Api-Key' : 'RSVcV-pNXnzaZgHTths0Qd11WsNJ_EK7'
+          }
+
+url = 'https://starmadedock.net/api/resources/'
+
+r = requests.get(url,headers=headers)
+
+data = r.json()
+
+print(data)

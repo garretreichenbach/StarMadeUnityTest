@@ -1,0 +1,90 @@
+package org.schema.game.common.data.element.quarters;
+
+import api.common.GameClient;
+import org.schema.game.client.view.mainmenu.DialogInput;
+import org.schema.game.common.controller.SegmentController;
+import org.schema.game.common.data.SegmentPiece;
+import org.schema.game.common.data.blockeffects.config.ConfigGroup;
+import org.schema.game.common.data.element.quarters.crew.CrewMember;
+import org.schema.game.common.data.player.PlayerState;
+import org.schema.schine.common.language.Lng;
+import org.schema.schine.graphicsengine.core.Timer;
+import org.schema.schine.graphicsengine.forms.gui.newgui.GUIContentPane;
+import org.schema.schine.graphicsengine.forms.gui.newgui.GUIMainWindow;
+import org.schema.schine.resource.tag.Tag;
+
+import java.util.ArrayList;
+
+public class TrainingQuarter extends Quarter {
+
+	private final ArrayList<CrewMember> inTraining = new ArrayList<>();
+
+	public TrainingQuarter(SegmentController s) {
+		super(s);
+	}
+
+	@Override
+	public QuarterType getType() {
+		return QuarterType.TRAINING;
+	}
+
+	@Override
+	public int getMaxDim() {
+		return 0;
+	}
+
+	@Override
+	public int getMinCrew() {
+		return 0;
+	}
+
+	@Override
+	public int getMaxCrew() {
+		return 0;
+	}
+
+	@Override
+	public void update(Timer timer) {
+
+	}
+
+	@Override
+	public void forceUpdate() {
+
+	}
+
+	@Override
+	public ConfigGroup createConfigGroup() {
+		return null;
+	}
+
+	@Override
+	public ConfigGroup createDamagedConfigGroup() {
+		return null;
+	}
+
+	@Override
+	public GUIMainWindow createGUI(SegmentPiece segmentPiece, PlayerState playerState, DialogInput dialogInput) {
+		GUIMainWindow panel = new GUIMainWindow(GameClient.getClientState(), 750, 500, "TRAINING") {
+
+			@Override
+			public void onInit() {
+				super.onInit();
+				GUIContentPane contentPane = addTab(Lng.str("TRAINING"));
+			}
+		};
+		panel.setCallback(dialogInput);
+		panel.onInit();
+		return panel;
+	}
+
+	@Override
+	public Tag toTagExtra() {
+		return null;
+	}
+
+	@Override
+	public void fromTagExtra(Tag tag) {
+
+	}
+}
