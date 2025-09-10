@@ -119,7 +119,8 @@ namespace Dev.Testing.Terrain {
 			}
 
 			// Second pass: rebuild all chunks now that neighbor data is available.
-			entity.RebuildChunkMeshes();
+			var chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
+			chunkGenQueue.RequestMeshRebuild(entity);
 			for(var i = 0; i < chunksTotal; i++) {
 				unsafe {
 					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data, Chunk.ChunkSize);

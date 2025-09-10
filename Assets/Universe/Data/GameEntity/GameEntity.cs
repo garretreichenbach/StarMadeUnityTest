@@ -82,7 +82,9 @@ namespace Universe.Data.GameEntity {
             return _chunks[0];
         }
 
-        public void RebuildChunkMeshes() {
+        public bool isDirty = false;
+
+        public void RebuildMesh() {
             var combine = new CombineInstance[_chunks.Length];
             for (var i = 0; i < _chunks.Length; i++) {
                 var chunk = _chunks[i];
@@ -106,6 +108,7 @@ namespace Universe.Data.GameEntity {
             var mesh = new Mesh();
             mesh.CombineMeshes(combine, true);
             meshFilter.mesh = mesh;
+            isDirty = false;
         } 
     }
     

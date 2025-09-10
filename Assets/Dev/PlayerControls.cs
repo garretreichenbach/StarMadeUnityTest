@@ -30,7 +30,8 @@ namespace Dev {
                             chunk.Data.SetBlockType(blockIndex, 1);
                         }
 
-                        entity.RebuildChunkMeshes();
+                        entity.isDirty = true;
+                        FindObjectOfType<ChunkGenerationQueue>().RequestMeshRebuild(entity);
                     }
                 }
             }
