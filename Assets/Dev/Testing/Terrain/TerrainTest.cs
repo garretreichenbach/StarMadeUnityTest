@@ -5,7 +5,7 @@ using Universe.Data.GameEntity;
 namespace Dev.Testing.Terrain {
 	public class TerrainTest : MonoBehaviour {
 		[Header("Generation Settings")]
-		public Vector3Int chunkDimensions = new Vector3Int(3, 3, 3);
+		public Vector3Int chunkDimensions = new(3, 3, 3);
 		public float noiseFrequency = 0.035f;
 		public float surfaceThickness = 10f;
 		public float shapeDistortion = 10f;
