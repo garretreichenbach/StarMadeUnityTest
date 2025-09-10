@@ -6,16 +6,26 @@ namespace Universe.Data.GameEntity {
     
     public abstract class GameEntity : MonoBehaviour {
 
+        static int _idCounter = 0;
+
         public struct GameEntityData {
             public GameEntityType Type;
-            public Guid UID;
+            public int ID;
             public string Name;
             public int FactionID;
             public int SectorID;
+
+            public GameEntityData(GameEntityType type, string name = "", int factionID = 0, int sectorID = 0) : this() {
+                Type = type;
+                ID = _idCounter++;
+                Name = name;
+                FactionID = factionID;
+                SectorID = sectorID;
+            }
         }
         
         public readonly GameEntityType Type;
-        public readonly string uid;
+        public readonly int ID;
         public bool loaded;
         protected int sectorID;
         private int _totalChunks;
