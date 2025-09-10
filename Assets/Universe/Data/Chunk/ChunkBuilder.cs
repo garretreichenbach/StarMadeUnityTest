@@ -5,6 +5,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering;
 using static Universe.Data.Chunk.Chunk;
@@ -15,6 +16,17 @@ namespace Universe.Data.Chunk {
 		// Optional resolver to query blocks outside the local chunk bounds.
 		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
 		public static System.Func<IChunkData, int, int, int, short> ExternalBlockResolver;
+		// LOD control: defines how aggressively we merge faces based on camera distance.
+		[InspectorLabel("LOD Distance Scale")]
+		[Tooltip("Higher = require more distance before increasing merge size.")]
+		public static float LODDistanceScale = 2f; // higher = require more distance before increasing merge size
+		[InspectorLabel("LOD Min Face At Near")]
+		[Tooltip("Minimum face size when the chunk is near the camera (lower = more detail).")]
+		public static int LODMinFaceAtNear = ChunkSize; // near chunks keep faces small
+		[InspectorLabel("LOD Max Face At Far")]
+		[Tooltip("Maximum face size when the chunk is far from the camera (higher = more detail).")]
+		public static int LODMaxFaceAtFar = 256; // far chunks can merge up to full chunk dimension
+		//Todo: Faces between chunks arent actually being combined yet, so this setting doesnt do anything!!!
 		static int _chunkCount;
 		static int _blockCount;
 		static int _vertexCount;
@@ -26,8 +38,10 @@ namespace Universe.Data.Chunk {
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
 
-			// Generate faces using greedy meshing per direction
-			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes);
+			// Compute a distance-based LOD for greedy meshing. Near = smaller max face, Far = larger max face.
+			int maxFace = ComputeMaxFaceSize(meshFilter.transform.position);
+			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
+			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
 
 			int totalFaces = facePositions.Count;
 			if (totalFaces == 0) {
@@ -85,7 +99,20 @@ namespace Universe.Data.Chunk {
 			_triangleCount += totalIndexCount / 3;
 		}
 
-		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes) {
+		static int ComputeMaxFaceSize(Vector3 chunkWorldPos) {
+			var cam = Camera.main;
+			//Todo: Update this every time the camera moves between chunks
+			if (cam == null) return math.clamp(LODMaxFaceAtFar, 1, ChunkSize);
+			float dist = Vector3.Distance(cam.transform.position, chunkWorldPos);
+			float unit = ChunkSize * LODDistanceScale;
+			int lod = (int)math.floor(dist / math.max(1f, unit));
+			lod = math.clamp(lod, 0, 10);
+			int size = 1 << lod; // 1,2,4,8,...
+			size = math.clamp(size, LODMinFaceAtNear, math.min(LODMaxFaceAtFar, ChunkSize));
+			return size;
+		}
+
+		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes, int maxFaceSize) {
 			int s = ChunkSize;
 			// Count blocks for stats
 			int totalBlocks = s * s * s;
@@ -156,10 +183,10 @@ namespace Universe.Data.Chunk {
 							short type = mask[u][v];
 							if (type == 0) continue;
 							int w = 1;
-							while (u + w < s && mask[u + w][v] == type) w++;
+							while (w < maxFaceSize && u + w < s && mask[u + w][v] == type) w++;
 							int h = 1;
 							bool stop = false;
-							while (v + h < s && !stop) {
+							while (h < maxFaceSize && v + h < s && !stop) {
 								for(int k = 0; k < w; k++)
 									if (mask[u + k][v + h] != type) {
 										stop = true;
