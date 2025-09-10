@@ -250,17 +250,19 @@ namespace Universe.Data.Chunk {
 						break;
 
 					case 4: // +Z, plane at z + 0.5, u=x, v=y
-						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f);
-						v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f);
-						v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f);
-						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f);
+						// Match ElementInfo winding so faces point outward
+						v0 = new Vector3(o.x - 0.5f,        o.y - 0.5f,        o.z + 0.5f); // bottom-left
+						v1 = new Vector3(o.x - 0.5f,        o.y - 0.5f + sv,   o.z + 0.5f); // top-left
+						v2 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f + sv,   o.z + 0.5f); // top-right
+						v3 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f,        o.z + 0.5f); // bottom-right
 						break;
-
+					
 					default: // 5: -Z, plane at z - 0.5, u=x, v=y
-						v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f);
-						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
-						v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f);
-						v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f);
+						// Match ElementInfo winding so faces point outward
+						v0 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f,        o.z - 0.5f); // bottom-right
+						v1 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f + sv,   o.z - 0.5f); // top-right
+						v2 = new Vector3(o.x - 0.5f,        o.y - 0.5f + sv,   o.z - 0.5f); // top-left
+						v3 = new Vector3(o.x - 0.5f,        o.y - 0.5f,        o.z - 0.5f); // bottom-left
 						break;
 				}
 

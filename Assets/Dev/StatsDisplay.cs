@@ -18,6 +18,8 @@ namespace Dev {
 			PacketStats = 4,
 			RenderStats = 8,
 			EntityStats = 16,
+			MemoryStats = 32,
+			All = FPS | Ping | PacketStats | RenderStats | EntityStats | MemoryStats,
 		}
 
 		public interface IStatsDisplayReporter {
