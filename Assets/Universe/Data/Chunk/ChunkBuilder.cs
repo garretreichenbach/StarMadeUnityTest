@@ -12,6 +12,9 @@ using static Universe.Data.Chunk.Chunk;
 namespace Universe.Data.Chunk {
 
 	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
+		// Optional resolver to query blocks outside the local chunk bounds.
+		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
+		public static System.Func<IChunkData, int, int, int, short> ExternalBlockResolver;
 		static int _chunkCount;
 		static int _blockCount;
 		static int _vertexCount;
@@ -97,7 +100,13 @@ namespace Universe.Data.Chunk {
 			}
 
 			ushort getTypeClamped(int x, int y, int z) {
-				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) return 0;
+				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
+					// Ask external resolver (neighbor chunks) if available; otherwise treat as air.
+					if (ExternalBlockResolver != null) {
+						return (ushort)ExternalBlockResolver(chunk, x, y, z);
+					}
+					return 0;
+				}
 				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
 			}
 
@@ -251,18 +260,18 @@ namespace Universe.Data.Chunk {
 
 					case 4: // +Z, plane at z + 0.5, u=x, v=y
 						// Match ElementInfo winding so faces point outward
-						v0 = new Vector3(o.x - 0.5f,        o.y - 0.5f,        o.z + 0.5f); // bottom-left
-						v1 = new Vector3(o.x - 0.5f,        o.y - 0.5f + sv,   o.z + 0.5f); // top-left
-						v2 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f + sv,   o.z + 0.5f); // top-right
-						v3 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f,        o.z + 0.5f); // bottom-right
+						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f); // bottom-left
+						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f); // top-left
+						v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f); // top-right
+						v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f); // bottom-right
 						break;
-					
+
 					default: // 5: -Z, plane at z - 0.5, u=x, v=y
 						// Match ElementInfo winding so faces point outward
-						v0 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f,        o.z - 0.5f); // bottom-right
-						v1 = new Vector3(o.x - 0.5f + su,   o.y - 0.5f + sv,   o.z - 0.5f); // top-right
-						v2 = new Vector3(o.x - 0.5f,        o.y - 0.5f + sv,   o.z - 0.5f); // top-left
-						v3 = new Vector3(o.x - 0.5f,        o.y - 0.5f,        o.z - 0.5f); // bottom-left
+						v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f); // bottom-right
+						v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f); // top-right
+						v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f); // top-left
+						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f); // bottom-left
 						break;
 				}
 
