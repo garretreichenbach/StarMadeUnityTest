@@ -9,7 +9,8 @@ namespace Universe.Data.Chunk {
 
 		public static readonly int ChunkSize = 32;
 
-		Mesh _mesh;
+		MeshFilter _meshFilter;
+		MeshRenderer _meshRenderer;
 		bool _flagUpdate;
 		GameEntity.GameEntity _entity;
 		long _index;
@@ -30,17 +31,18 @@ namespace Universe.Data.Chunk {
 		 */
 		public void Rebuild() {
 			Clear();
-			_mesh = gameObject.AddComponent<MeshFilter>().mesh;
-			var meshRenderer = gameObject.AddComponent<MeshRenderer>();
-			meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
-			ChunkBuilder.BuildChunk(Data, _mesh);
+			_meshFilter = gameObject.AddComponent<MeshFilter>();
+			_meshRenderer = gameObject.AddComponent<MeshRenderer>();
+			_meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
+			ChunkBuilder.BuildChunk(Data, _meshFilter, _meshRenderer);
 			_flagUpdate = false;
 		}
 
 		public void Clear() {
-			if (!_mesh) return;
-			Destroy(_mesh);
-			_mesh = null;
+			if (_meshFilter != null) {
+				Destroy(_meshFilter.mesh);
+				Destroy(_meshRenderer);
+			}
 		}
 
 		void Update() {

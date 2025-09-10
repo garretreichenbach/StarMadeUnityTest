@@ -15,7 +15,7 @@ namespace Settings {
 		public IntOptionsSettingsValue FPSLimit = new(
 			name: "FPS Limit",
 			description: "Limit the game's frame rate to this value. Set to -1 for unlimited.",
-			defaultValue: 60,
+			defaultValue: 120,
 			allowedValues: new[] { -1, 30, 60, 120 },
 			false,
 			new ISettingsChangeListener[] {
