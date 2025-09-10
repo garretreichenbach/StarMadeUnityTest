@@ -5,101 +5,10 @@ using UnityEngine;
 
 namespace Universe.Data.Chunk {
 
-	public class Chunk : MonoBehaviour {
-
+	public struct Chunk {
 		//How many blocks each chunk holds on each axis (32x32x32 = 32768 blocks)
 		public static readonly int ChunkSize = 32;
-
-		MeshFilter _meshFilter;
-		MeshRenderer _meshRenderer;
-		bool _flagUpdate;
-		GameEntity.GameEntity _entity;
-		long _index;
 		public IChunkData Data;
-
-		public Chunk(GameEntity.GameEntity entity, long index, IChunkData data) {
-			_entity = entity;
-			_index = index;
-			Data = data;
-		}
-
-		public void FlagNeedsUpdate() {
-			_flagUpdate = true;
-		}
-
-		/**
-		 * Rebuilds the chunk mesh by clearing out the existing physical blocks and re-populating them.
-		 */
-		public void Rebuild() {
-			Clear();
-			_meshFilter = gameObject.AddComponent<MeshFilter>();
-			_meshRenderer = gameObject.AddComponent<MeshRenderer>();
-			_meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
-			ChunkBuilder.BuildChunk(Data, _meshFilter, _meshRenderer);
-			_flagUpdate = false;
-		}
-
-		public void Clear() {
-			if (_meshFilter != null) {
-				Destroy(_meshFilter.mesh);
-				Destroy(_meshRenderer);
-			}
-		}
-
-		void Update() {
-			//Todo: Some sort of queue for updates rather than doing them all at once
-			if (!_flagUpdate) return;
-			_flagUpdate = false;
-			Rebuild();
-		}
-	}
-
-	public class ChunkBuffer : MonoBehaviour {
-
-		bool _flagUpdate;
-		Chunk[] _chunkData;
-
-		public ChunkBuffer Create(int chunksTotal) {
-			_chunkData = new Chunk[chunksTotal];
-			for(var i = 0; i < chunksTotal; i++) {
-				_chunkData[i] = gameObject.AddComponent<Chunk>();
-				_chunkData[i].Data = new ChunkDataV8(i);
-			}
-			return this;
-		}
-
-		public Chunk GetChunkData(int index) {
-			if (index < 0 || index >= _chunkData.Length) {
-				throw new IndexOutOfRangeException("Chunk index out of range: " + index);
-			}
-			return _chunkData[index];
-		}
-
-		public void SetChunkData(int index, Chunk data) {
-			if (index < 0 || index >= _chunkData.Length) {
-				throw new IndexOutOfRangeException("Chunk index out of range: " + index);
-			}
-			_chunkData[index] = data;
-		}
-
-		public int GetTotalChunks() {
-			return _chunkData.Length;
-		}
-
-		public Chunk[] GetAllChunkData() {
-			return _chunkData;
-		}
-	}
-
-	public class ChunkBaker : Baker<Chunk> {
-
-		public override void Bake(Chunk chunk) {
-			var entity = GetEntity(TransformUsageFlags.Dynamic);
-			ChunkDataV8 data = (ChunkDataV8) chunk.Data;
-			AddComponent(entity, data);
-			DependsOn(chunk);
-			chunk.FlagNeedsUpdate();
-		}
 	}
 
 	/**

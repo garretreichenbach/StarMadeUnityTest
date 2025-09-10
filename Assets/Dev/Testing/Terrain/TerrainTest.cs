@@ -22,8 +22,11 @@ namespace Dev.Testing.Terrain {
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);
 
+			entity.chunkDimensions = chunkDimensions;
+
 			var chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
-			ChunkBuffer buffer = entity.gameObject.AddComponent<ChunkBuffer>().Create(chunksTotal);
+			entity.TotalChunks = chunksTotal;
+			entity.LoadInSector(0);
 
 			// Provide cross-chunk block resolver so faces between chunks are culled
 			ChunkBuilder.ExternalBlockResolver = (currentChunk, lx, ly, lz) => {
@@ -44,7 +47,7 @@ namespace Dev.Testing.Terrain {
 				if (cx < 0 || cy < 0 || cz < 0 || cx >= chunkDimensions.x || cy >= chunkDimensions.y || cz >= chunkDimensions.z)
 					return 0;
 				int neighborIndex = cx + cy * chunkDimensions.x + cz * chunkDimensions.x * chunkDimensions.y;
-				var neighborChunk = buffer.GetChunkData(neighborIndex).Data;
+				var neighborChunk = entity.Chunks[neighborIndex].Data;
 				long bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
@@ -104,21 +107,15 @@ namespace Dev.Testing.Terrain {
 					}
 				}
 
-				var chunkGo = new GameObject("Chunk" + i);
-				chunkGo.transform.parent = entity.transform;
-				chunkGo.transform.position = chunkPos;
-				var chunk = chunkGo.AddComponent<Chunk>();
-				chunk.Data = chunkData;
-				buffer.SetChunkData(i, chunk);
+				entity.Chunks[i] = new Chunk { Data = chunkData };
 				// Defer rebuild until all neighbor chunk data is assigned, to ensure cross-chunk culling works.
 			}
 
 			// Second pass: rebuild all chunks now that neighbor data is available.
+			entity.RebuildChunkMeshes();
 			for (var i = 0; i < chunksTotal; i++) {
-				var chunk = buffer.GetChunkData(i);
-				chunk.Rebuild();
 				unsafe {
-					ChunkAllocator.Free(((ChunkDataV8)chunk.Data).Data);
+					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data);
 				}
 			}
 		}

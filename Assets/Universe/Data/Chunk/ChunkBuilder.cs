@@ -34,13 +34,13 @@ namespace Universe.Data.Chunk {
 		static int _vertexCount;
 		static int _triangleCount;
 
-		public static void BuildChunk(IChunkData chunk, MeshFilter meshFilter, MeshRenderer renderer) {
+		public static Mesh BuildChunk(IChunkData chunk, Vector3 chunkPosition) {
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
 
 			// Compute a distance-based LOD for greedy meshing. Near = smaller max face, Far = larger max face.
-			int maxFace = ComputeMaxFaceSize(meshFilter.transform.position);
+			int maxFace = ComputeMaxFaceSize(chunkPosition);
 			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
 			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
 
@@ -50,9 +50,7 @@ namespace Universe.Data.Chunk {
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
 				empty.RecalculateBounds();
-				meshFilter.mesh = empty;
-				renderer.material = Resources.Load<Material>("ChunkMaterial");
-				return;
+				return empty;
 			}
 
 			int totalVertexCount = totalFaces * 4;
@@ -94,13 +92,13 @@ namespace Universe.Data.Chunk {
 			buildJob.FaceDirs.Dispose();
 			buildJob.FaceSizes.Dispose();
 			newMesh.RecalculateBounds();
-			meshFilter.mesh = newMesh;
-			renderer.material = Resources.Load<Material>("ChunkMaterial");
 
 			// Update simple stats
 			_chunkCount++;
 			_vertexCount += totalVertexCount;
 			_triangleCount += totalIndexCount / 3;
+
+			return newMesh;
 		}
 
 		static int ComputeMaxFaceSize(Vector3 chunkWorldPos) {

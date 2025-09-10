@@ -29,8 +29,26 @@ namespace Universe.Data.GameEntity {
         public bool loaded;
         protected int sectorID;
         private int _totalChunks;
-        
-        private ChunkBuffer ChunkBuffer { get; set; }
+        private Chunk.Chunk[] _chunks;
+
+        public Chunk.Chunk[] Chunks {
+            get => _chunks;
+            set => _chunks = value;
+        }
+
+        public int TotalChunks {
+            get => _totalChunks;
+            set => _totalChunks = value;
+        }
+
+        public Vector3Int chunkDimensions;
+
+        public Vector3 GetChunkPosition(int index) {
+            var chunkX = index % chunkDimensions.x;
+            var chunkY = (index / chunkDimensions.x) % chunkDimensions.y;
+            var chunkZ = index / (chunkDimensions.x * chunkDimensions.y);
+            return new Vector3(chunkX * Chunk.Chunk.ChunkSize, chunkY * Chunk.Chunk.ChunkSize, chunkZ * Chunk.Chunk.ChunkSize);
+        }
 
         protected GameEntity(GameEntityType type) {
             Type = type;
@@ -53,11 +71,41 @@ namespace Universe.Data.GameEntity {
         public void LoadInSector(int sectorID) {
             try {
                 this.sectorID = sectorID;
-                ChunkBuffer = gameObject.AddComponent<ChunkBuffer>().Create(_totalChunks);
+                _chunks = new Chunk.Chunk[_totalChunks];
             } catch(Exception e) {
                 Debug.LogError("Failed to load entity in sector: " + e.Message);
                 loaded = false;
             }
+        } 
+
+        public Chunk.Chunk GetChunk() {
+            return _chunks[0];
+        }
+
+        public void RebuildChunkMeshes() {
+            var combine = new CombineInstance[_chunks.Length];
+            for (var i = 0; i < _chunks.Length; i++) {
+                var chunk = _chunks[i];
+                var chunkPos = GetChunkPosition(i);
+                var chunkMesh = Chunk.ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
+                combine[i].mesh = chunkMesh;
+                combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
+            }
+
+            var meshFilter = GetComponent<MeshFilter>();
+            if (meshFilter == null) {
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+            }
+
+            var meshRenderer = GetComponent<MeshRenderer>();
+            if (meshRenderer == null) {
+                meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
+            }
+
+            var mesh = new Mesh();
+            mesh.CombineMeshes(combine, true);
+            meshFilter.mesh = mesh;
         } 
     }
     
