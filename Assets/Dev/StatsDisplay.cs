@@ -22,6 +22,8 @@ namespace Dev {
 			All = FPS | Ping | PacketStats | RenderStats | EntityStats | MemoryStats,
 		}
 
+		//Todo: Add some way to visualize chunk borders better, like a grid overlay or colored edges
+		
 		public interface IStatsDisplayReporter {
 			string Report(DisplayMode displayMode, float deltaTime);
 
