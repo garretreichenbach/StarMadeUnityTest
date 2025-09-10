@@ -12,6 +12,7 @@ namespace Dev {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
+			//Todo: Track memory usage specific to Chunk Generation, not just total memory
 			long memory = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / 1048576;
 			return displayMode.HasFlag(StatsDisplay.DisplayMode.MemoryStats) ? $"Memory Usage: {memory} MB" : "";
 		}
