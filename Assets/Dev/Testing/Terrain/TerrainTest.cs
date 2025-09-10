@@ -46,6 +46,7 @@ namespace Dev.Testing.Terrain {
 				return neighborChunk.GetBlockType(bi);
 			};
 		
+			// First pass: create chunks and assign fully populated data, but do NOT rebuild yet.
 			for (var i = 0; i < chunksTotal; i++) {
 				var chunkX = i % chunkDimensionX;
 				var chunkY = (i / chunkDimensionX) % chunkDimensionY;
@@ -72,9 +73,15 @@ namespace Dev.Testing.Terrain {
 				var chunk = chunkGo.AddComponent<Chunk>();
 				chunk.Data = chunkData;
 				buffer.SetChunkData(i, chunk);
+				// Defer rebuild until all neighbor chunk data is assigned, to ensure cross-chunk culling works.
+			}
+
+			// Second pass: rebuild all chunks now that neighbor data is available.
+			for (var i = 0; i < chunksTotal; i++) {
+				var chunk = buffer.GetChunkData(i);
 				chunk.Rebuild();
 				unsafe {
-					ChunkAllocator.Free(((ChunkDataV8)chunkData).Data);
+					ChunkAllocator.Free(((ChunkDataV8)chunk.Data).Data);
 				}
 			}
 		}
