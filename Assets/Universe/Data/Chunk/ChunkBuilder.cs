@@ -14,6 +14,7 @@ namespace Universe.Data.Chunk {
 	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 
 		static int _chunkCount;
+		static int _blockCount;
 		static int _vertexCount;
 		static int _triangleCount;
 
@@ -26,21 +27,34 @@ namespace Universe.Data.Chunk {
 			for (int i = 0; i < totalBlocks; i++) {
 				var type = chunk.GetBlockType(i);
 				if (type == 0) continue;
+				_blockCount ++;
 				var posV3 = chunk.GetBlockPosition(i);
 				int x = (int)posV3.x; int y = (int)posV3.y; int z = (int)posV3.z;
 				// Check 6 neighbors
 				// +X neighbor
-				if (x + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x+1,y,z))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(0); }
+				if (x + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x + 1, y, z))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(0);
+				}
 				// -X
-				if (x - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x-1,y,z))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(1); }
+				if (x - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x - 1, y, z))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(1);
+				}
 				// +Y
-				if (y + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x,y+1,z))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(2); }
+				if (y + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y + 1, z))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(2);
+				}
 				// -Y
-				if (y - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x,y-1,z))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(3); }
+				if (y - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y - 1, z))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(3);
+				}
 				// +Z
-				if (z + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x,y,z+1))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(4); }
+				if (z + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z + 1))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(4);
+				}
 				// -Z
-				if (z - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x,y,z-1))) == 0) { facePositions.Add(new float3(x,y,z)); faceDirs.Add(5); }
+				if (z - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z - 1))) == 0) {
+					facePositions.Add(new float3(x,y,z)); faceDirs.Add(5);
+				}
 			}
 
 			int totalFaces = facePositions.Count;
@@ -202,13 +216,14 @@ namespace Universe.Data.Chunk {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats) ? "" : $"ChunkBuilder:\n\t{_chunkCount} chunks\n\t{_vertexCount} vertices\n\t{_triangleCount} triangles\n";
+			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats) ? "" : $"ChunkBuilder:\n\t{_chunkCount} chunks\n\t{_blockCount} blocks\n\t{_vertexCount} vertices\n\t{_triangleCount} triangles\n";
 		}
 
 		public void ClearLastReport() {
 			_chunkCount = 0;
 			_vertexCount = 0;
 			_triangleCount = 0;
+			_blockCount = 0;
 		}
 
 		void Start() {

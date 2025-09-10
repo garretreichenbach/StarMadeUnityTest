@@ -1,20 +1,9 @@
-using Unity.VisualScripting;
 using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.GameEntity;
 
 namespace Dev.Testing.Terrain {
 	public class TerrainTest : MonoBehaviour {
-
-		[InspectorLabel("Asteroid Radius")]
-		public float asteroidRadius = 32f;
-
-		[InspectorLabel("Noise Scale")]
-		public float noiseScale = 0.5f;
-
-		[InspectorLabel("Surface Level")]
-		public float surfaceLevel = 0.5f;
-
 		void Start() {
 			GameEntity entity = new GameObject("TestAsteroid").AddComponent<Asteroid>();
 			entity.LoadDataFromDB(new GameEntity.GameEntityData {
@@ -27,9 +16,9 @@ namespace Dev.Testing.Terrain {
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);
 
-			var chunkDimensionX = 2;
+			var chunkDimensionX = 50;
 			var chunkDimensionY = 1;
-			var chunkDimensionZ = 2;
+			var chunkDimensionZ = 50;
 			var chunksTotal = chunkDimensionX * chunkDimensionY * chunkDimensionZ;
 			ChunkBuffer buffer = entity.gameObject.AddComponent<ChunkBuffer>().Create(chunksTotal);
 
