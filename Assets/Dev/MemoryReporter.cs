@@ -1,4 +1,5 @@
 using UnityEngine;
+using Universe.Data.Chunk;
 
 namespace Dev {
 	public class MemoryReporter : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
@@ -12,9 +13,8 @@ namespace Dev {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			//Todo: Track memory usage specific to Chunk Generation, not just total memory
-			long memory = UnityEngine.Profiling.Profiler.GetTotalAllocatedMemoryLong() / 1048576;
-			return displayMode.HasFlag(StatsDisplay.DisplayMode.MemoryStats) ? $"Memory Usage: {memory} MB" : "";
+			long memory = ChunkAllocator.TotalAllocatedMemory / 1048576;
+			return displayMode.HasFlag(StatsDisplay.DisplayMode.MemoryStats) ? $"Chunk Memory: {memory} MB" : "";
 		}
 
 		public void ClearLastReport() { }

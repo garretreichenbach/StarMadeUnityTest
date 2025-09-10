@@ -37,12 +37,30 @@ namespace Dev.Testing.Terrain {
 				int cy = (ci / chunkDimensions.x) % chunkDimensions.y;
 				int cz = ci / (chunkDimensions.x * chunkDimensions.y);
 				// Adjust coordinates and move to neighbor chunk if needed
-				if (lx < 0) { cx--; lx = s - 1; }
-				else if (lx >= s) { cx++; lx = 0; }
-				if (ly < 0) { cy--; ly = s - 1; }
-				else if (ly >= s) { cy++; ly = 0; }
-				if (lz < 0) { cz--; lz = s - 1; }
-				else if (lz >= s) { cz++; lz = 0; }
+				if (lx < 0) {
+					cx--;
+					lx = s - 1;
+				}
+				else if (lx >= s) {
+					cx++;
+					lx = 0;
+				}
+				if (ly < 0) {
+					cy--;
+					ly = s - 1;
+				}
+				else if (ly >= s) {
+					cy++;
+					ly = 0;
+				}
+				if (lz < 0) {
+					cz--;
+					lz = s - 1;
+				}
+				else if (lz >= s) {
+					cz++;
+					lz = 0;
+				}
 				// If outside world bounds, treat as air
 				if (cx < 0 || cy < 0 || cz < 0 || cx >= chunkDimensions.x || cy >= chunkDimensions.y || cz >= chunkDimensions.z)
 					return 0;
@@ -51,15 +69,15 @@ namespace Dev.Testing.Terrain {
 				long bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
-		
+
 			// First pass: create chunks and assign fully populated data, but do NOT rebuild yet.
-			for (var i = 0; i < chunksTotal; i++) {
+			for(var i = 0; i < chunksTotal; i++) {
 				var chunkX = i % chunkDimensions.x;
 				var chunkY = (i / chunkDimensions.x) % chunkDimensions.y;
 				var chunkZ = i / (chunkDimensions.x * chunkDimensions.y);
-				
+
 				var chunkPos = new Vector3(chunkX * Chunk.ChunkSize, chunkY * Chunk.ChunkSize, chunkZ * Chunk.ChunkSize);
-				
+
 				IChunkData chunkData;
 				unsafe {
 					chunkData = new ChunkDataV8(i, ChunkAllocator.Allocate(Chunk.ChunkSize));
@@ -67,39 +85,28 @@ namespace Dev.Testing.Terrain {
 					var centerX = (chunkDimensions.x * Chunk.ChunkSize) / 2;
 					var centerY = (chunkDimensions.y * Chunk.ChunkSize) / 2;
 					var centerZ = (chunkDimensions.z * Chunk.ChunkSize) / 2;
-					for (var x = 0; x < Chunk.ChunkSize; x++) {
-						for (var y = 0; y < Chunk.ChunkSize; y++) {
-							for (var z = 0; z < Chunk.ChunkSize; z++) {
+					for(var x = 0; x < Chunk.ChunkSize; x++) {
+						for(var y = 0; y < Chunk.ChunkSize; y++) {
+							for(var z = 0; z < Chunk.ChunkSize; z++) {
 								var blockIndex = x + y * Chunk.ChunkSize + z * Chunk.ChunkSize * Chunk.ChunkSize;
 								var worldX = chunkX * Chunk.ChunkSize + x;
 								var worldY = chunkY * Chunk.ChunkSize + y;
 								var worldZ = chunkZ * Chunk.ChunkSize + z;
-								
+
 								var distortion = Perlin.Noise(worldX * noiseFrequency, worldY * noiseFrequency, worldZ * noiseFrequency) * shapeDistortion;
 								var distortedRadius = radius + distortion;
-								
+
 								var distance = Mathf.Sqrt(Mathf.Pow(worldX - centerX, 2) + Mathf.Pow(worldY - centerY, 2) + Mathf.Pow(worldZ - centerZ, 2));
-								if (distance <= distortedRadius)
-								{
-									if (distance > distortedRadius - surfaceThickness)
-									{
+								if (distance <= distortedRadius) {
+									if (distance > distortedRadius - surfaceThickness) {
 										var noise = Perlin.Noise(worldX * noiseFrequency * 2, worldY * noiseFrequency * 2, worldZ * noiseFrequency * 2);
-										if (distance <= distortedRadius - noise * 5)
-										{
-											chunkData.SetBlockType(blockIndex, 1);
-										}
-										else
-										{
-											chunkData.SetBlockType(blockIndex, 0);
-										}
+										chunkData.SetBlockType(blockIndex, distance <= distortedRadius - noise * 5 ? (short)1 : (short)0);
 									}
-									else
-									{
+									else {
 										chunkData.SetBlockType(blockIndex, 1);
 									}
 								}
-								else
-								{
+								else {
 									chunkData.SetBlockType(blockIndex, 0);
 								}
 							}
@@ -113,9 +120,9 @@ namespace Dev.Testing.Terrain {
 
 			// Second pass: rebuild all chunks now that neighbor data is available.
 			entity.RebuildChunkMeshes();
-			for (var i = 0; i < chunksTotal; i++) {
+			for(var i = 0; i < chunksTotal; i++) {
 				unsafe {
-					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data);
+					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data, Chunk.ChunkSize);
 				}
 			}
 		}
