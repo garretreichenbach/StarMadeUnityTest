@@ -12,20 +12,20 @@ namespace Universe.Data.Chunk {
 		public static void BuildChunk(IChunkData chunk, Mesh mesh) {
 			var vertices = new System.Collections.Generic.List<Vector3>();
 			var triangles = new System.Collections.Generic.List<int>();
-			
-			for (var x = 0; x < ChunkSize; x++) {
-				for (var y = 0; y < ChunkSize; y++) {
-					for (var z = 0; z < ChunkSize; z++) {
+
+			for(var x = 0; x < ChunkSize; x++) {
+				for(var y = 0; y < ChunkSize; y++) {
+					for(var z = 0; z < ChunkSize; z++) {
 						var index = chunk.GetBlockIndex(new Vector3(x, y, z));
 						if (chunk.GetBlockType(index) == 0) continue;
 
 						// Check for exposed faces
 						if (x == 0 || (x > 0 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x - 1, y, z))) == 0)) {
-							// Left face
-							vertices.Add(new Vector3(x, y, z));
-							vertices.Add(new Vector3(x, y + 1, z));
+							// Left face (normal -X)
 							vertices.Add(new Vector3(x, y, z + 1));
 							vertices.Add(new Vector3(x, y + 1, z + 1));
+							vertices.Add(new Vector3(x, y, z));
+							vertices.Add(new Vector3(x, y + 1, z));
 							AddTriangles(vertices.Count - 4);
 						}
 						if (x == ChunkSize - 1 || (x < ChunkSize - 1 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x + 1, y, z))) == 0)) {
@@ -37,12 +37,12 @@ namespace Universe.Data.Chunk {
 							AddTriangles(vertices.Count - 4, false);
 						}
 						if (y == 0 || (y > 0 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y - 1, z))) == 0)) {
-							// Bottom face
-							vertices.Add(new Vector3(x, y, z));
-							vertices.Add(new Vector3(x + 1, y, z));
+							// Bottom face (normal -Y)
 							vertices.Add(new Vector3(x, y, z + 1));
 							vertices.Add(new Vector3(x + 1, y, z + 1));
-							AddTriangles(vertices.Count - 4, false);
+							vertices.Add(new Vector3(x, y, z));
+							vertices.Add(new Vector3(x + 1, y, z));
+							AddTriangles(vertices.Count - 4);
 						}
 						if (y == ChunkSize - 1 || (y < ChunkSize - 1 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y + 1, z))) == 0)) {
 							// Top face
@@ -53,12 +53,12 @@ namespace Universe.Data.Chunk {
 							AddTriangles(vertices.Count - 4);
 						}
 						if (z == 0 || (z > 0 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z - 1))) == 0)) {
-							// Back face
-							vertices.Add(new Vector3(x, y, z));
-							vertices.Add(new Vector3(x, y + 1, z));
+							// Back face (normal -Z)
 							vertices.Add(new Vector3(x + 1, y, z));
 							vertices.Add(new Vector3(x + 1, y + 1, z));
-							AddTriangles(vertices.Count - 4, false);
+							vertices.Add(new Vector3(x, y, z));
+							vertices.Add(new Vector3(x, y + 1, z));
+							AddTriangles(vertices.Count - 4);
 						}
 						if (z == ChunkSize - 1 || (z < ChunkSize - 1 && chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z + 1))) == 0)) {
 							// Front face
@@ -78,7 +78,7 @@ namespace Universe.Data.Chunk {
 			mesh.RecalculateNormals();
 			mesh.RecalculateBounds();
 			mesh.Optimize();
-            mesh.UploadMeshData(true);
+			mesh.UploadMeshData(true);
 			chunkCount++;
 			vertexCount += vertices.Count;
 			triangleCount += triangles.Count / 3;
@@ -91,7 +91,8 @@ namespace Universe.Data.Chunk {
 					triangles.Add(offset + 2);
 					triangles.Add(offset + 1);
 					triangles.Add(offset + 3);
-				} else {
+				}
+				else {
 					triangles.Add(offset + 2);
 					triangles.Add(offset + 1);
 					triangles.Add(offset + 0);
@@ -103,7 +104,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats) ? "" : $"ChunkBuilder: {chunkCount} chunks, {vertexCount} vertices, {triangleCount} triangles";
+			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats) ? "" : $"ChunkBuilder:\n\t{chunkCount} chunks\n\t{vertexCount} vertices\n\t{triangleCount} triangles\n";
 		}
 
 		public void ClearLastReport() {

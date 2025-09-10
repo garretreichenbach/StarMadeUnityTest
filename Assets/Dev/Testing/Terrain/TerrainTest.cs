@@ -52,6 +52,7 @@ namespace Dev.Testing.Terrain {
 						}
 					}
 				}
+
 				var chunkGo = new GameObject("Chunk" + i);
 				chunkGo.transform.parent = entity.transform;
 				chunkGo.transform.position = chunkPos;

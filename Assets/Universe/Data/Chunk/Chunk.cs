@@ -205,10 +205,18 @@ namespace Universe.Data.Chunk {
 			Data[index] = (Data[index] & DataMaskInverted) | ((data & DataMask) << DataBitsStart);
 		}
 		public Vector3 GetBlockPosition(long index) {
-			return new Vector3(index % Chunk.ChunkSize, index / Chunk.ChunkSize, 0);
+			var size = Chunk.ChunkSize;
+			var x = (int)(index % size);
+			var y = (int)((index / size) % size);
+			var z = (int)(index / (size * size));
+			return new Vector3(x, y, z);
 		}
 		public long GetBlockIndex(Vector3 position) {
-			return (long) position.x + (long) position.y * Chunk.ChunkSize;
+			var size = Chunk.ChunkSize;
+			int x = (int)position.x;
+			int y = (int)position.y;
+			int z = (int)position.z;
+			return (long)x + (long)y * size + (long)z * size * size;
 		}
 
 		public unsafe bool GetBlockActivation(long index) {

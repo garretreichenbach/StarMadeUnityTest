@@ -7,7 +7,7 @@ namespace Settings {
 	 * Serializable settings for the game engine.
 	 */
 	public class EngineSettings : MonoBehaviour {
-		private const string SettingsFilePath = "Assets/Config/settings.json";
+		const string SettingsFilePath = "Assets/Config/settings.json";
 
 		public static EngineSettings Instance { get; private set; }
 
@@ -58,9 +58,8 @@ namespace Settings {
 			}
 		);
 
-		private void Awake() {
+		void Start() {
 			Instance = this;
-			DontDestroyOnLoad(gameObject);
 			LoadSettings();
 		}
 		
