@@ -7,6 +7,7 @@ namespace Universe.Data.Chunk {
 
 	public class Chunk : MonoBehaviour {
 
+		//How many blocks each chunk holds on each axis (32x32x32 = 32768 blocks)
 		public static readonly int ChunkSize = 32;
 
 		MeshFilter _meshFilter;

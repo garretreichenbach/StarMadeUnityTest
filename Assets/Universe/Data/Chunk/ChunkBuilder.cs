@@ -11,21 +11,23 @@ using UnityEngine.Rendering;
 using static Universe.Data.Chunk.Chunk;
 
 namespace Universe.Data.Chunk {
-
 	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 		// Optional resolver to query blocks outside the local chunk bounds.
 		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
-		public static System.Func<IChunkData, int, int, int, short> ExternalBlockResolver;
+		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
+
 		// LOD control: defines how aggressively we merge faces based on camera distance.
-		[InspectorLabel("LOD Distance Scale")]
-		[Tooltip("Higher = require more distance before increasing merge size.")]
+		[InspectorLabel("LOD Distance Scale")] [Tooltip("Higher = require more distance before increasing merge size.")]
 		public static float LODDistanceScale = 2f; // higher = require more distance before increasing merge size
+
 		[InspectorLabel("LOD Min Face At Near")]
 		[Tooltip("Minimum face size when the chunk is near the camera (lower = more detail).")]
 		public static int LODMinFaceAtNear = ChunkSize; // near chunks keep faces small
+
 		[InspectorLabel("LOD Max Face At Far")]
 		[Tooltip("Maximum face size when the chunk is far from the camera (higher = more detail).")]
 		public static int LODMaxFaceAtFar = 256; // far chunks can merge up to full chunk dimension
+
 		//Todo: Faces between chunks arent actually being combined yet, so this setting doesnt do anything!!!
 		static int _chunkCount;
 		static int _blockCount;
@@ -33,7 +35,6 @@ namespace Universe.Data.Chunk {
 		static int _triangleCount;
 
 		public static void BuildChunk(IChunkData chunk, MeshFilter meshFilter, MeshRenderer renderer) {
-
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
@@ -44,7 +45,7 @@ namespace Universe.Data.Chunk {
 			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
 
 			int totalFaces = facePositions.Count;
-			if (totalFaces == 0) {
+			if(totalFaces == 0) {
 				var empty = new Mesh();
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
@@ -58,9 +59,12 @@ namespace Universe.Data.Chunk {
 			int totalIndexCount = totalFaces * 6;
 
 			var buildJob = new BuildFacesJob {
-				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
-				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
-				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory)
+				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory),
+				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory),
+				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory)
 			};
 			for(int i = 0; i < facePositions.Count; i++) {
 				buildJob.FacePositions[i] = facePositions[i];
@@ -102,7 +106,7 @@ namespace Universe.Data.Chunk {
 		static int ComputeMaxFaceSize(Vector3 chunkWorldPos) {
 			var cam = Camera.main;
 			//Todo: Update this every time the camera moves between chunks
-			if (cam == null) return math.clamp(LODMaxFaceAtFar, 1, ChunkSize);
+			if(cam == null) return math.clamp(LODMaxFaceAtFar, 1, ChunkSize);
 			float dist = Vector3.Distance(cam.transform.position, chunkWorldPos);
 			float unit = ChunkSize * LODDistanceScale;
 			int lod = (int)math.floor(dist / math.max(1f, unit));
@@ -112,13 +116,14 @@ namespace Universe.Data.Chunk {
 			return size;
 		}
 
-		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes, int maxFaceSize) {
+		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes,
+			int maxFaceSize) {
 			int s = ChunkSize;
 			// Count blocks for stats
 			int totalBlocks = s * s * s;
-			for(int i = 0; i < totalBlocks; i++)
-				if (chunk.GetBlockType(i) != 0)
-					_blockCount++;
+			for(int i = 0; i < totalBlocks; i++) {
+				if(chunk.GetBlockType(i) != 0) _blockCount++;
+			}
 
 			// Temporary mask arrays (short block type)
 			short[][] mask = new short[s][];
@@ -126,22 +131,24 @@ namespace Universe.Data.Chunk {
 				mask[index] = new short[s];
 			}
 
-			ushort getTypeClamped(int x, int y, int z) {
-				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
+			ushort GetTypeClamped(int x, int y, int z) {
+				if(x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
 					// Ask external resolver (neighbor chunks) if available; otherwise treat as air.
-					if (ExternalBlockResolver != null) {
+					if(ExternalBlockResolver != null) {
 						return (ushort)ExternalBlockResolver(chunk, x, y, z);
 					}
+
 					return 0;
 				}
+
 				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
 			}
 
-			void greedySlice(int axis, int sgn) {
+			void GreedySlice(int axis, int sgn) {
 				int W, H; // dimensions of the mask (u=W, v=H)
 				for(int i = 0; i < s; i++) {
 					// Build mask for slice i on given axis/sign
-					if (axis == 0) {
+					if(axis == 0) {
 						W = s;
 						H = s; // u=z, v=y at fixed x=i
 						for(int v = 0; v < H; v++)
@@ -149,30 +156,28 @@ namespace Universe.Data.Chunk {
 							int x = i;
 							int y = v;
 							int z = u;
-							ushort a = getTypeClamped(x, y, z);
-							ushort b = getTypeClamped(x + sgn, y, z);
+							ushort a = GetTypeClamped(x, y, z);
+							ushort b = GetTypeClamped(x + sgn, y, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
-					}
-					else if (axis == 1) {
+					} else if(axis == 1) {
 						W = s;
 						H = s; // u=x, v=z at fixed y=i
 						for(int v = 0; v < H; v++)
 						for(int u = 0; u < W; u++) {
 							int x = u, y = i, z = v;
-							ushort a = getTypeClamped(x, y, z);
-							ushort b = getTypeClamped(x, y + sgn, z);
+							ushort a = GetTypeClamped(x, y, z);
+							ushort b = GetTypeClamped(x, y + sgn, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
-					}
-					else {
+					} else {
 						W = s;
 						H = s; // axis==2, u=x, v=y at fixed z=i
 						for(int v = 0; v < H; v++)
 						for(int u = 0; u < W; u++) {
 							int x = u, y = v, z = i;
-							ushort a = getTypeClamped(x, y, z);
-							ushort b = getTypeClamped(x, y, z + sgn);
+							ushort a = GetTypeClamped(x, y, z);
+							ushort b = GetTypeClamped(x, y, z + sgn);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
 					}
@@ -181,38 +186,38 @@ namespace Universe.Data.Chunk {
 					for(int v = 0; v < s; v++) {
 						for(int u = 0; u < s; u++) {
 							short type = mask[u][v];
-							if (type == 0) continue;
+							if(type == 0) continue;
 							int w = 1;
-							while (w < maxFaceSize && u + w < s && mask[u + w][v] == type) w++;
+							while(w < maxFaceSize && u + w < s && mask[u + w][v] == type) w++;
 							int h = 1;
 							bool stop = false;
-							while (h < maxFaceSize && v + h < s && !stop) {
+							while(h < maxFaceSize && v + h < s && !stop) {
 								for(int k = 0; k < w; k++)
-									if (mask[u + k][v + h] != type) {
+									if(mask[u + k][v + h] != type) {
 										stop = true;
 										break;
 									}
-								if (!stop) h++;
+
+								if(!stop) h++;
 							}
+
 							// Clear mask
 							for(int dv = 0; dv < h; dv++)
 							for(int du = 0; du < w; du++)
 								mask[u + du][v + dv] = 0;
 
 							// Emit face
-							if (axis == 0) {
+							if(axis == 0) {
 								// x fixed = i, u=z, v=y
 								positions.Add(new float3(i, v, u));
 								dirs.Add((byte)(sgn > 0 ? 0 : 1));
 								sizes.Add(new int2(w, h));
-							}
-							else if (axis == 1) {
+							} else if(axis == 1) {
 								// y fixed = i, u=x, v=z
 								positions.Add(new float3(u, i, v));
 								dirs.Add((byte)(sgn > 0 ? 2 : 3));
 								sizes.Add(new int2(w, h));
-							}
-							else {
+							} else {
 								// z fixed = i, u=x, v=y
 								positions.Add(new float3(u, v, i));
 								dirs.Add((byte)(sgn > 0 ? 4 : 5));
@@ -224,14 +229,14 @@ namespace Universe.Data.Chunk {
 			}
 
 			// X axis
-			greedySlice(0, +1);
-			greedySlice(0, -1);
+			GreedySlice(0, +1);
+			GreedySlice(0, -1);
 			// Y axis
-			greedySlice(1, +1);
-			greedySlice(1, -1);
+			GreedySlice(1, +1);
+			GreedySlice(1, -1);
 			// Z axis
-			greedySlice(2, +1);
-			greedySlice(2, -1);
+			GreedySlice(2, +1);
+			GreedySlice(2, -1);
 		}
 
 		[BurstCompile] //Disable this if you need to debug stuff
@@ -239,7 +244,9 @@ namespace Universe.Data.Chunk {
 			public Mesh.MeshData OutputMesh;
 			[ReadOnly] public NativeArray<float3> FacePositions; // origin cell (x,y,z)
 			[ReadOnly] public NativeArray<byte> FaceDirs; // 0..5 as before
-			[ReadOnly] public NativeArray<int2> FaceSizes; // size along the two axes on the face (u = first, v = second)
+
+			[ReadOnly]
+			public NativeArray<int2> FaceSizes; // size along the two axes on the face (u = first, v = second)
 
 			public void Execute(int index) {
 				int vStart = index * 4;
@@ -256,7 +263,7 @@ namespace Universe.Data.Chunk {
 				var outputTris = OutputMesh.GetIndexData<int>();
 
 				Vector3 v0, v1, v2, v3;
-				switch (dir) {
+				switch(dir) {
 					case 0: // +X, plane at x + 0.5, u=z, v=y
 						v0 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z - 0.5f);
 						v1 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z + su - 0.5f);
@@ -347,7 +354,9 @@ namespace Universe.Data.Chunk {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats) ? "" : $"ChunkBuilder:\n\t{_chunkCount} chunks\n\t{_blockCount} blocks\n\t{_vertexCount} vertices\n\t{_triangleCount} triangles\n";
+			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats)
+				? ""
+				: $"ChunkBuilder:\n\t{_chunkCount} chunks\n\t{_blockCount} blocks\n\t{_vertexCount} vertices\n\t{_triangleCount} triangles\n";
 		}
 
 		public void ClearLastReport() {
@@ -357,8 +366,6 @@ namespace Universe.Data.Chunk {
 			_blockCount = 0;
 		}
 
-		void Start() {
-			FindFirstObjectByType<StatsDisplay>()?.Reporters.Add(this);
-		}
+		void Start() { FindFirstObjectByType<StatsDisplay>()?.Reporters.Add(this); }
 	}
 }
