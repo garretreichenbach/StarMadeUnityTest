@@ -45,9 +45,9 @@ namespace Universe.Data.GameEntity {
         public GameEntity LoadDataFromDB(GameEntityData data) {
             //Todo: Implement loading from DB
             //For now, just create a new entity entirely for testing
-            Ship ship = gameObject.AddComponent<Ship>();
-            ship.Initialize(data);
-            return ship;
+            Asteroid asteroid = gameObject.AddComponent<Asteroid>();
+            asteroid.Initialize(data);
+            return asteroid;
         }
         
         public void LoadInSector(int sectorID) {
@@ -65,6 +65,7 @@ namespace Universe.Data.GameEntity {
         Ship,
         Station,
         Asteroid,
+        Planet,
         Player,
         Character,
     }
