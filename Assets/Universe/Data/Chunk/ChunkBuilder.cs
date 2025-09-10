@@ -11,7 +11,14 @@ using UnityEngine.Rendering;
 using static Universe.Data.Chunk.Chunk;
 
 namespace Universe.Data.Chunk {
-	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
+	public struct ChunkBuildResult {
+		public Mesh mesh;
+		public int vertexCount;
+		public int triangleCount;
+		public int blockCount;
+	}
+
+	public class ChunkBuilder : MonoBehaviour {
 		// Optional resolver to query blocks outside the local chunk bounds.
 		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
 		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
@@ -29,12 +36,8 @@ namespace Universe.Data.Chunk {
 		public static int LODMaxFaceAtFar = 256; // far chunks can merge up to full chunk dimension
 
 		//Todo: Faces between chunks arent actually being combined yet, so this setting doesnt do anything!!!
-		static int _chunkCount;
-		static int _blockCount;
-		static int _vertexCount;
-		static int _triangleCount;
 
-		public static Mesh BuildChunk(IChunkData chunk, Vector3 chunkPosition) {
+		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition) {
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
@@ -42,7 +45,7 @@ namespace Universe.Data.Chunk {
 			// Compute a distance-based LOD for greedy meshing. Near = smaller max face, Far = larger max face.
 			int maxFace = ComputeMaxFaceSize(chunkPosition);
 			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
-			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
+			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
 
 			int totalFaces = facePositions.Count;
 			if(totalFaces == 0) {
@@ -50,7 +53,7 @@ namespace Universe.Data.Chunk {
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
 				empty.RecalculateBounds();
-				return empty;
+				return new ChunkBuildResult { mesh = empty, vertexCount = 0, triangleCount = 0, blockCount = 0 };
 			}
 
 			int totalVertexCount = totalFaces * 4;
@@ -93,12 +96,7 @@ namespace Universe.Data.Chunk {
 			buildJob.FaceSizes.Dispose();
 			newMesh.RecalculateBounds();
 
-			// Update simple stats
-			_chunkCount++;
-			_vertexCount += totalVertexCount;
-			_triangleCount += totalIndexCount / 3;
-
-			return newMesh;
+			return new ChunkBuildResult { mesh = newMesh, vertexCount = totalVertexCount, triangleCount = totalIndexCount / 3, blockCount = blockCount };
 		}
 
 		static int ComputeMaxFaceSize(Vector3 chunkWorldPos) {
@@ -114,13 +112,14 @@ namespace Universe.Data.Chunk {
 			return size;
 		}
 
-		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes,
+		static int GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes,
 			int maxFaceSize) {
 			int s = ChunkSize;
 			// Count blocks for stats
 			int totalBlocks = s * s * s;
+			int blockCount = 0;
 			for(int i = 0; i < totalBlocks; i++) {
-				if(chunk.GetBlockType(i) != 0) _blockCount++;
+				if(chunk.GetBlockType(i) != 0) blockCount++;
 			}
 
 			// Temporary mask arrays (short block type)
@@ -235,6 +234,7 @@ namespace Universe.Data.Chunk {
 			// Z axis
 			GreedySlice(2, +1);
 			GreedySlice(2, -1);
+			return blockCount;
 		}
 
 		[BurstCompile] //Disable this if you need to debug stuff
@@ -351,19 +351,5 @@ namespace Universe.Data.Chunk {
 			}
 		}
 
-		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			return !displayMode.HasFlag(StatsDisplay.DisplayMode.RenderStats)
-				? ""
-				: $"ChunkBuilder:\n\t{_chunkCount} chunks\n\t{_blockCount} blocks\n\t{_vertexCount} vertices\n\t{_triangleCount} triangles\n";
-		}
-
-		public void ClearLastReport() {
-			_chunkCount = 0;
-			_vertexCount = 0;
-			_triangleCount = 0;
-			_blockCount = 0;
-		}
-
-		void Start() { FindFirstObjectByType<StatsDisplay>()?.Reporters.Add(this); }
 	}
 }

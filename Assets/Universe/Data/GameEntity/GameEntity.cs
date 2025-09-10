@@ -25,15 +25,20 @@ namespace Universe.Data.GameEntity {
         }
         
         public readonly GameEntityType Type;
-        public readonly int ID;
+        public int ID;
         public bool loaded;
         protected int sectorID;
         private int _totalChunks;
         private Chunk.Chunk[] _chunks;
 
+        [Header("Stats")]
+        public int blockCount;
+        public int chunkCount;
+        public int triangleCount;
+        public int vertexCount;
+
         public Chunk.Chunk[] Chunks {
             get => _chunks;
-            set => _chunks = value;
         }
 
         public int TotalChunks {
@@ -86,12 +91,20 @@ namespace Universe.Data.GameEntity {
 
         public void RebuildMesh() {
             var combine = new CombineInstance[_chunks.Length];
+            blockCount = 0;
+            chunkCount = _chunks.Length;
+            triangleCount = 0;
+            vertexCount = 0;
+
             for (var i = 0; i < _chunks.Length; i++) {
                 var chunk = _chunks[i];
                 var chunkPos = GetChunkPosition(i);
-                var chunkMesh = Chunk.ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
-                combine[i].mesh = chunkMesh;
+                var result = Chunk.ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
+                combine[i].mesh = result.mesh;
                 combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
+                blockCount += result.blockCount;
+                triangleCount += result.triangleCount;
+                vertexCount += result.vertexCount;
             }
 
             var meshFilter = GetComponent<MeshFilter>();
