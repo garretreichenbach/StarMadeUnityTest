@@ -1,3 +1,4 @@
+using Networking.Entity;
 using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.GameEntity;
@@ -204,7 +205,7 @@ namespace Dev.Testing.Terrain {
 			Debug.Log("=== Simulating Network Generation ===");
 
 			// Simulate what a client would receive from server
-			var networkChunkData = new NetworkChunkData[] {
+			var networkChunkData = new[] {
 				// Natural chunks - just send seed
 				new NetworkChunkData { chunkX = 0, chunkY = 0, chunkZ = 0, seed = worldSeed, isModified = false },
 				new NetworkChunkData { chunkX = 1, chunkY = 0, chunkZ = 0, seed = worldSeed, isModified = false },
@@ -222,17 +223,6 @@ namespace Dev.Testing.Terrain {
 					Debug.Log($"Chunk [{chunkData.chunkX},{chunkData.chunkY},{chunkData.chunkZ}] - seed: {calculatedSeed} (bandwidth: 8 bytes)");
 				}
 			}
-		}
-
-		/// <summary>
-		/// Simulated network chunk data structure
-		/// </summary>
-		[System.Serializable]
-		public struct NetworkChunkData {
-			public int chunkX, chunkY, chunkZ;
-			public long seed; // -1 if modified
-			public bool isModified;
-			public byte[] voxelData; // Only used if isModified = true
 		}
 	}
 }
