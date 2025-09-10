@@ -10,8 +10,8 @@ using UnityEngine.Rendering;
 using static Universe.Data.Chunk.Chunk;
 
 namespace Universe.Data.Chunk {
-	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 
+	public class ChunkBuilder : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 		static int _chunkCount;
 		static int _blockCount;
 		static int _vertexCount;
@@ -21,51 +21,13 @@ namespace Universe.Data.Chunk {
 
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
+			var faceSizes = new List<int2>();
 
-			int totalBlocks = ChunkSize * ChunkSize * ChunkSize;
-			for(int i = 0; i < totalBlocks; i++) {
-				var type = chunk.GetBlockType(i);
-				if (type == 0) continue;
-				_blockCount++;
-				var posV3 = chunk.GetBlockPosition(i);
-				int x = (int)posV3.x;
-				int y = (int)posV3.y;
-				int z = (int)posV3.z;
-				// Check 6 neighbors
-				// +X neighbor
-				if(x + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x + 1, y, z))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(0);
-				}
-				// -X
-				if(x - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x - 1, y, z))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(1);
-				}
-				// +Y
-				if(y + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y + 1, z))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(2);
-				}
-				// -Y
-				if(y - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y - 1, z))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(3);
-				}
-				// +Z
-				if(z + 1 >= ChunkSize || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z + 1))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(4);
-				}
-				// -Z
-				if(z - 1 < 0 || chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z - 1))) != type) {
-					facePositions.Add(new float3(x, y, z));
-					faceDirs.Add(5);
-				}
-			}
+			// Generate faces using greedy meshing per direction
+			GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes);
 
 			int totalFaces = facePositions.Count;
-			if(totalFaces == 0) {
+			if (totalFaces == 0) {
 				var empty = new Mesh();
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
@@ -80,11 +42,13 @@ namespace Universe.Data.Chunk {
 
 			var buildJob = new BuildFacesJob {
 				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
-				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory)
+				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
+				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory)
 			};
 			for(int i = 0; i < facePositions.Count; i++) {
 				buildJob.FacePositions[i] = facePositions[i];
 				buildJob.FaceDirs[i] = faceDirs[i];
+				buildJob.FaceSizes[i] = faceSizes[i];
 			}
 
 			var outputMeshData = Mesh.AllocateWritableMeshData(1);
@@ -107,6 +71,7 @@ namespace Universe.Data.Chunk {
 			Mesh.ApplyAndDisposeWritableMeshData(outputMeshData, new[] { newMesh });
 			buildJob.FacePositions.Dispose();
 			buildJob.FaceDirs.Dispose();
+			buildJob.FaceSizes.Dispose();
 			newMesh.RecalculateBounds();
 			meshFilter.mesh = newMesh;
 			renderer.material = Resources.Load<Material>("ChunkMaterial");
@@ -117,33 +82,203 @@ namespace Universe.Data.Chunk {
 			_triangleCount += totalIndexCount / 3;
 		}
 
+		static void GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes) {
+			int s = ChunkSize;
+			// Count blocks for stats
+			int totalBlocks = s * s * s;
+			for(int i = 0; i < totalBlocks; i++)
+				if (chunk.GetBlockType(i) != 0)
+					_blockCount++;
+
+			// Temporary mask arrays (short block type)
+			short[][] mask = new short[s][];
+			for(int index = 0; index < s; index++) {
+				mask[index] = new short[s];
+			}
+
+			ushort getTypeClamped(int x, int y, int z) {
+				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) return 0;
+				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
+			}
+
+			void greedySlice(int axis, int sgn) {
+				int W, H; // dimensions of the mask (u=W, v=H)
+				for(int i = 0; i < s; i++) {
+					// Build mask for slice i on given axis/sign
+					if (axis == 0) {
+						W = s;
+						H = s; // u=z, v=y at fixed x=i
+						for(int v = 0; v < H; v++)
+						for(int u = 0; u < W; u++) {
+							int x = i;
+							int y = v;
+							int z = u;
+							ushort a = getTypeClamped(x, y, z);
+							ushort b = getTypeClamped(x + sgn, y, z);
+							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+						}
+					}
+					else if (axis == 1) {
+						W = s;
+						H = s; // u=x, v=z at fixed y=i
+						for(int v = 0; v < H; v++)
+						for(int u = 0; u < W; u++) {
+							int x = u, y = i, z = v;
+							ushort a = getTypeClamped(x, y, z);
+							ushort b = getTypeClamped(x, y + sgn, z);
+							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+						}
+					}
+					else {
+						W = s;
+						H = s; // axis==2, u=x, v=y at fixed z=i
+						for(int v = 0; v < H; v++)
+						for(int u = 0; u < W; u++) {
+							int x = u, y = v, z = i;
+							ushort a = getTypeClamped(x, y, z);
+							ushort b = getTypeClamped(x, y, z + sgn);
+							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+						}
+					}
+
+					// Greedy merge rectangles of same type
+					for(int v = 0; v < s; v++) {
+						for(int u = 0; u < s; u++) {
+							short type = mask[u][v];
+							if (type == 0) continue;
+							int w = 1;
+							while (u + w < s && mask[u + w][v] == type) w++;
+							int h = 1;
+							bool stop = false;
+							while (v + h < s && !stop) {
+								for(int k = 0; k < w; k++)
+									if (mask[u + k][v + h] != type) {
+										stop = true;
+										break;
+									}
+								if (!stop) h++;
+							}
+							// Clear mask
+							for(int dv = 0; dv < h; dv++)
+							for(int du = 0; du < w; du++)
+								mask[u + du][v + dv] = 0;
+
+							// Emit face
+							if (axis == 0) {
+								// x fixed = i, u=z, v=y
+								positions.Add(new float3(i, v, u));
+								dirs.Add((byte)(sgn > 0 ? 0 : 1));
+								sizes.Add(new int2(w, h));
+							}
+							else if (axis == 1) {
+								// y fixed = i, u=x, v=z
+								positions.Add(new float3(u, i, v));
+								dirs.Add((byte)(sgn > 0 ? 2 : 3));
+								sizes.Add(new int2(w, h));
+							}
+							else {
+								// z fixed = i, u=x, v=y
+								positions.Add(new float3(u, v, i));
+								dirs.Add((byte)(sgn > 0 ? 4 : 5));
+								sizes.Add(new int2(w, h));
+							}
+						}
+					}
+				}
+			}
+
+			// X axis
+			greedySlice(0, +1);
+			greedySlice(0, -1);
+			// Y axis
+			greedySlice(1, +1);
+			greedySlice(1, -1);
+			// Z axis
+			greedySlice(2, +1);
+			greedySlice(2, -1);
+		}
+
 		[BurstCompile] //Disable this if you need to debug stuff
 		struct BuildFacesJob : IJobParallelFor {
 			public Mesh.MeshData OutputMesh;
-			[ReadOnly] public NativeArray<float3> FacePositions;
-			[ReadOnly] public NativeArray<byte> FaceDirs;
+			[ReadOnly] public NativeArray<float3> FacePositions; // origin cell (x,y,z)
+			[ReadOnly] public NativeArray<byte> FaceDirs; // 0..5 as before
+			[ReadOnly] public NativeArray<int2> FaceSizes; // size along the two axes on the face (u = first, v = second)
 
 			public void Execute(int index) {
 				int vStart = index * 4;
 				int tStart = index * 6;
-				float3 basePos = FacePositions[index];
+				float3 o = FacePositions[index];
 				byte dir = FaceDirs[index];
+				int2 size = FaceSizes[index];
+				int su = size.x; // width along the first axis of the face
+				int sv = size.y; // height along the second axis
 
 				var outputVerts = OutputMesh.GetVertexData<Vector3>();
 				var outputNormals = OutputMesh.GetVertexData<Vector3>(stream: 1);
 				var outputUVs = OutputMesh.GetVertexData<Vector2>(stream: 2);
 				var outputTris = OutputMesh.GetIndexData<int>();
 
-				// Write quad vertices based on face dir
-				for(int corner = 0; corner < 4; corner++) {
-					float3 offset = GetFaceVertex(dir, corner);
-					float3 v = basePos + offset;
-					outputVerts[vStart + corner] = new Vector3(v.x, v.y, v.z);
-					float3 n = GetFaceNormal(dir);
-					outputNormals[vStart + corner] = new Vector3(n.x, n.y, n.z);
-					outputUVs[vStart + corner] = GetFaceUV(corner);
+				Vector3 v0, v1, v2, v3;
+				switch (dir) {
+					case 0: // +X, plane at x + 0.5, u=z, v=y
+						v0 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z - 0.5f);
+						v1 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z + su - 0.5f);
+						v2 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
+						v3 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
+						break;
+
+					case 1: // -X, plane at x - 0.5, u=z, v=y
+						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + su - 0.5f);
+						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+						v2 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
+						v3 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
+						break;
+
+					case 2: // +Y, plane at y + 0.5, u=x, v=z
+						v0 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z - 0.5f);
+						v1 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z - 0.5f);
+						v2 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
+						v3 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
+						break;
+
+					case 3: // -Y, plane at y - 0.5, u=x, v=z
+						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
+						v1 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
+						v2 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z - 0.5f);
+						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+						break;
+
+					case 4: // +Z, plane at z + 0.5, u=x, v=y
+						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f);
+						v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f);
+						v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f);
+						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f);
+						break;
+
+					default: // 5: -Z, plane at z - 0.5, u=x, v=y
+						v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f);
+						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+						v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f);
+						v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f);
+						break;
 				}
-				// Triangles (0,2,1, 0,3,2) with base vStart
+
+				outputVerts[vStart + 0] = v0;
+				outputVerts[vStart + 1] = v1;
+				outputVerts[vStart + 2] = v2;
+				outputVerts[vStart + 3] = v3;
+				var n = GetFaceNormal(dir);
+				outputNormals[vStart + 0] = new Vector3(n.x, n.y, n.z);
+				outputNormals[vStart + 1] = new Vector3(n.x, n.y, n.z);
+				outputNormals[vStart + 2] = new Vector3(n.x, n.y, n.z);
+				outputNormals[vStart + 3] = new Vector3(n.x, n.y, n.z);
+				// Stretch UVs 0..1 across the merged face
+				outputUVs[vStart + 0] = new Vector2(0, 0);
+				outputUVs[vStart + 1] = new Vector2(1, 0);
+				outputUVs[vStart + 2] = new Vector2(1, 1);
+				outputUVs[vStart + 3] = new Vector2(0, 1);
+				// Triangles
 				outputTris[tStart + 0] = vStart + 0;
 				outputTris[tStart + 1] = vStart + 2;
 				outputTris[tStart + 2] = vStart + 1;
@@ -153,85 +288,23 @@ namespace Universe.Data.Chunk {
 			}
 
 			static float3 GetFaceNormal(byte dir) {
-				switch (dir) {
-					case 0: return new float3(1, 0, 0);
-
-					case 1: return new float3(-1, 0, 0);
-
-					case 2: return new float3(0, 1, 0);
-
-					case 3: return new float3(0, -1, 0);
-
-					case 4: return new float3(0, 0, 1);
-
-					default: return new float3(0, 0, -1);
-				}
+				return dir switch {
+					0 => new float3(1, 0, 0),
+					1 => new float3(-1, 0, 0),
+					2 => new float3(0, 1, 0),
+					3 => new float3(0, -1, 0),
+					4 => new float3(0, 0, 1),
+					_ => new float3(0, 0, -1)
+				};
 			}
 
 			static Vector2 GetFaceUV(int corner) {
-				switch (corner) {
-					case 0: return new Vector2(0, 0);
-
-					case 1: return new Vector2(1, 0);
-
-					case 2: return new Vector2(1, 1);
-
-					default: return new Vector2(0, 1);
-				}
-			}
-
-			static float3 GetFaceVertex(byte dir, int corner) {
-				// Returns local-space vertex offset for the given face and corner
-				// Matching ElementInfo layout
-				switch (dir) {
-					case 0: // +X
-						return corner switch {
-							0 => new float3(0.5f, -0.5f, -0.5f),
-							1 => new float3(0.5f, -0.5f, 0.5f),
-							2 => new float3(0.5f, 0.5f, 0.5f),
-							_ => new float3(0.5f, 0.5f, -0.5f)
-						};
-
-					case 1: // -X
-						return corner switch {
-							0 => new float3(-0.5f, -0.5f, 0.5f),
-							1 => new float3(-0.5f, -0.5f, -0.5f),
-							2 => new float3(-0.5f, 0.5f, -0.5f),
-							_ => new float3(-0.5f, 0.5f, 0.5f)
-						};
-
-					case 2: // +Y
-						return corner switch {
-							0 => new float3(-0.5f, 0.5f, -0.5f),
-							1 => new float3(0.5f, 0.5f, -0.5f),
-							2 => new float3(0.5f, 0.5f, 0.5f),
-							_ => new float3(-0.5f, 0.5f, 0.5f)
-						};
-
-					case 3: // -Y
-						return corner switch {
-							0 => new float3(-0.5f, -0.5f, 0.5f),
-							1 => new float3(0.5f, -0.5f, 0.5f),
-							2 => new float3(0.5f, -0.5f, -0.5f),
-							_ => new float3(-0.5f, -0.5f, -0.5f)
-						};
-
-					case 4: // +Z
-						return corner switch {
-							0 => new float3(-0.5f, -0.5f, 0.5f),
-							1 => new float3(-0.5f, 0.5f, 0.5f),
-							2 => new float3(0.5f, 0.5f, 0.5f),
-							_ => new float3(0.5f, -0.5f, 0.5f)
-						};
-
-					default: // 5: -Z
-						return corner switch {
-							0 => new float3(0.5f, -0.5f, -0.5f),
-							1 => new float3(0.5f, 0.5f, -0.5f),
-							2 => new float3(-0.5f, 0.5f, -0.5f),
-							_ => new float3(-0.5f, -0.5f, -0.5f)
-						};
-				}
+				return corner switch {
+					0 => new Vector2(0, 0),
+					1 => new Vector2(1, 0),
+					2 => new Vector2(1, 1),
+					_ => new Vector2(0, 1)
+				};
 			}
 		}
 
