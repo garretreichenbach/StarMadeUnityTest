@@ -24,10 +24,6 @@ namespace Graphics.LOD {
 		[Tooltip("Auto-rebuild mesh when LOD changes")]
 		public bool autoRebuildOnLODChange = true;
 
-		[Header("Debug Visualization")]
-		[Tooltip("Show chunk borders for debugging greedy meshing")]
-		public bool showChunkBorders = false;
-
 		private ChunkLODManager lodManager;
 		private GameEntity gameEntity;
 		private bool isRegistered = false;
@@ -238,27 +234,6 @@ namespace Graphics.LOD {
 			}
 			else {
 				UnityEditor.Handles.Label(pos, "LOD: No Camera");
-			}
-
-			// Draw chunk borders if enabled
-			if (showChunkBorders && gameEntity != null && gameEntity.Chunks != null) {
-				Gizmos.color = Color.blue; // Color for chunk borders
-				int chunkSize = Universe.Data.Chunk.Chunk.ChunkSize;
-				Vector3 entityOrigin = gameEntity.transform.position;
-
-				for (int i = 0; i < gameEntity.Chunks.Length; i++) {
-					int cx = i % gameEntity.chunkDimensions.x;
-					int cy = (i / gameEntity.chunkDimensions.x) % gameEntity.chunkDimensions.y;
-					int cz = i / (gameEntity.chunkDimensions.x * gameEntity.chunkDimensions.y);
-
-					Vector3 chunkCenter = entityOrigin + new Vector3(
-						(cx + 0.5f) * chunkSize,
-						(cy + 0.5f) * chunkSize,
-						(cz + 0.5f) * chunkSize
-					);
-					Vector3 chunkSizeVector = new Vector3(chunkSize, chunkSize, chunkSize);
-					Gizmos.DrawWireCube(chunkCenter, chunkSizeVector);
-				}
 			}
 		}
 #endif

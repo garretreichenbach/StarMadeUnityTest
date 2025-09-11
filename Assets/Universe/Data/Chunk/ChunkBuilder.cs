@@ -45,7 +45,7 @@ namespace Universe.Data.Chunk {
 		[InspectorLabel("LOD Levels")]
 		[Tooltip("Number of discrete LOD levels (2-8)")]
 		[Range(2, 8)]
-		public static int LODLevelCount = 8;
+		public static int LODLevelCount = 5;
 
 		[InspectorLabel("Min Face Size")]
 		[Tooltip("Minimum face size for highest detail LOD")]
@@ -54,7 +54,7 @@ namespace Universe.Data.Chunk {
 
 		[InspectorLabel("Max Face Size")]
 		[Tooltip("Maximum face size for lowest detail LOD")]
-		[Range(4, 32)]
+		[Range(4, 256)]
 		public static int LODMaxFaceAtFar = 32;
 
 		[Header("Performance")]
@@ -70,32 +70,8 @@ namespace Universe.Data.Chunk {
 		private static Dictionary<int, float> lodBuildTimes = new Dictionary<int, float>();
 		private static int totalBuilds = 0;
 
-		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition, IChunkData[] neighbors, int? forcedLOD = null) {
+		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition, int? forcedLOD = null) {
 			var startTime = Time.realtimeSinceStartup;
-
-			// Set up the external block resolver for this build operation
-			ExternalBlockResolver = (c, x, y, z) => {
-				// Determine which neighbor chunk to query based on x, y, z
-				// This logic needs to be robust to handle all 6 directions
-				// For simplicity, let's assume a fixed order for neighbors: +X, -X, +Y, -Y, +Z, -Z
-				// This will need to be properly implemented based on how neighbors are passed
-				
-				int neighborIndex = -1; // Placeholder
-				int localX = x, localY = y, localZ = z;
-				int s = ChunkSize;
-
-				if (x >= s) { neighborIndex = 0; localX = x - s; } // +X
-				else if (x < 0) { neighborIndex = 1; localX = x + s; } // -X
-				else if (y >= s) { neighborIndex = 2; localY = y - s; } // +Y
-				else if (y < 0) { neighborIndex = 3; localY = y + s; } // -Y
-				else if (z >= s) { neighborIndex = 4; localZ = z - s; } // +Z
-				else if (z < 0) { neighborIndex = 5; localZ = z + s; } // -Z
-
-				if (neighborIndex != -1 && neighbors != null && neighbors.Length > neighborIndex && neighbors[neighborIndex] != null) {
-					return neighbors[neighborIndex].GetBlockType(neighbors[neighborIndex].GetBlockIndex(new Vector3(localX, localY, localZ)));
-				}
-				return 0; // Default to air if no neighbor or invalid access
-			};
 
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
@@ -231,9 +207,8 @@ namespace Universe.Data.Chunk {
 		static int GetFaceSizeForLODLevel(int lodLevel) {
 			if (LODLevelCount <= 1) return LODMinFaceAtNear;
 
-					float t = (float)lodLevel / (LODLevelCount - 1);
-		// Apply non-linear scaling for LOD aggressiveness
-		int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
+			float t = (float)lodLevel / (LODLevelCount - 1);
+			int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
 
 			faceSize = Mathf.NextPowerOfTwo(faceSize);
 
@@ -563,8 +538,8 @@ namespace Universe.Data.Chunk {
 		/// <summary>
 		/// Build chunk with specific LOD level (for debugging)
 		/// </summary>
-		public static ChunkBuildResult BuildChunkAtLOD(IChunkData chunk, Vector3 chunkPosition, IChunkData[] neighbors, int lodLevel) {
-			return BuildChunk(chunk, chunkPosition, neighbors, lodLevel);
+		public static ChunkBuildResult BuildChunkAtLOD(IChunkData chunk, Vector3 chunkPosition, int lodLevel) {
+			return BuildChunk(chunk, chunkPosition, lodLevel);
 		}
 
 		/// <summary>
