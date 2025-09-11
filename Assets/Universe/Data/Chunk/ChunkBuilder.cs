@@ -79,35 +79,17 @@ namespace Universe.Data.Chunk {
 				// This logic needs to be robust to handle all 6 directions
 				// For simplicity, let's assume a fixed order for neighbors: +X, -X, +Y, -Y, +Z, -Z
 				// This will need to be properly implemented based on how neighbors are passed
-
+				
 				int neighborIndex = -1; // Placeholder
 				int localX = x, localY = y, localZ = z;
 				int s = ChunkSize;
 
-				if (x >= s) {
-					neighborIndex = 0;
-					localX = x - s;
-				} // +X
-				else if (x < 0) {
-					neighborIndex = 1;
-					localX = x + s;
-				} // -X
-				else if (y >= s) {
-					neighborIndex = 2;
-					localY = y - s;
-				} // +Y
-				else if (y < 0) {
-					neighborIndex = 3;
-					localY = y + s;
-				} // -Y
-				else if (z >= s) {
-					neighborIndex = 4;
-					localZ = z - s;
-				} // +Z
-				else if (z < 0) {
-					neighborIndex = 5;
-					localZ = z + s;
-				} // -Z
+				if (x >= s) { neighborIndex = 0; localX = x - s; } // +X
+				else if (x < 0) { neighborIndex = 1; localX = x + s; } // -X
+				else if (y >= s) { neighborIndex = 2; localY = y - s; } // +Y
+				else if (y < 0) { neighborIndex = 3; localY = y + s; } // -Y
+				else if (z >= s) { neighborIndex = 4; localZ = z - s; } // +Z
+				else if (z < 0) { neighborIndex = 5; localZ = z + s; } // -Z
 
 				if (neighborIndex != -1 && neighbors != null && neighbors.Length > neighborIndex && neighbors[neighborIndex] != null) {
 					return neighbors[neighborIndex].GetBlockType(neighbors[neighborIndex].GetBlockIndex(new Vector3(localX, localY, localZ)));
@@ -122,17 +104,8 @@ namespace Universe.Data.Chunk {
 			// Determine LOD level and face size
 			LODInfo lodInfo = ComputeLODInfo(chunkPosition, forcedLOD);
 
-			// Apply voxel downsampling if LOD level is greater than 1
-			IChunkData processedChunk = chunk;
-			int currentChunkSize = chunk.GetSize(); // Get original chunk size
-
-			if (lodInfo.lodLevel > 1) { // Or a configurable threshold
-				processedChunk = DownsampleChunk(chunk, lodInfo.lodLevel, neighbors);
-				currentChunkSize = processedChunk.GetSize(); // Update chunk size for downsampled chunk
-			}
-
 			// Generate faces using greedy meshing with LOD-appropriate face size
-			int blockCount = GenerateGreedyFaces(processedChunk, facePositions, faceDirs, faceSizes, lodInfo.faceSize, currentChunkSize);
+			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, lodInfo.faceSize);
 
 			int totalFaces = facePositions.Count;
 			if (totalFaces == 0) {
@@ -258,9 +231,9 @@ namespace Universe.Data.Chunk {
 		static int GetFaceSizeForLODLevel(int lodLevel) {
 			if (LODLevelCount <= 1) return LODMinFaceAtNear;
 
-			float t = (float)lodLevel / (LODLevelCount - 1);
-			// Apply non-linear scaling for LOD aggressiveness
-			int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
+					float t = (float)lodLevel / (LODLevelCount - 1);
+		// Apply non-linear scaling for LOD aggressiveness
+		int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
 
 			faceSize = Mathf.NextPowerOfTwo(faceSize);
 
@@ -426,8 +399,8 @@ namespace Universe.Data.Chunk {
 		}
 
 		static int GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes,
-			int maxFaceSize, int currentChunkSize) {
-			int s = currentChunkSize;
+			int maxFaceSize) {
+			int s = ChunkSize;
 			int blockCount = 0;
 
 			// Count blocks for stats
@@ -443,7 +416,7 @@ namespace Universe.Data.Chunk {
 			}
 
 			ushort GetTypeClamped(int x, int y, int z) {
-				if (x < 0 || y < 0 || z < 0 || x >= currentChunkSize || y >= currentChunkSize || z >= currentChunkSize) {
+				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
 					if (ExternalBlockResolver != null) {
 						return (ushort)ExternalBlockResolver(chunk, x, y, z);
 					}
@@ -601,113 +574,6 @@ namespace Universe.Data.Chunk {
 			int faceSize = GetFaceSizeForLODLevel(lodLevel);
 			float reductionFactor = 1f / (faceSize * faceSize);
 			return Mathf.RoundToInt(blockCount * 6 * reductionFactor); // 6 faces per block max
-		}
-
-		/// <summary>
-		/// Downsamples a chunk for LOD, reducing the visual block count.
-		/// </summary>
-		/// <param name="originalChunk">The original chunk data.</param>
-		/// <param name="lodLevel">The current LOD level.</param>
-		/// <returns>A new IChunkData representing the downsampled chunk.</returns>
-		public static IChunkData DownsampleChunk(IChunkData originalChunk, int lodLevel, IChunkData[] neighbors) {
-			if (lodLevel <= 1) { // No downsampling for LOD 0 and 1
-				return originalChunk;
-			}
-
-			int originalSize = originalChunk.GetSize();
-			int downsampleFactor = 1 << (lodLevel - 1); // 2^(lodLevel-1) for LOD 1, 2, 4, etc.
-			if (downsampleFactor >= originalSize) { // Prevent downsampling beyond chunk size
-				downsampleFactor = originalSize;
-			}
-
-			int newSize = originalSize / downsampleFactor;
-			int[] downsampledBlocks = new int[newSize * newSize * newSize];
-
-			// Temporarily set up the external block resolver for this downsampling operation
-			// This assumes the neighbors array is correctly ordered (+X, -X, +Y, -Y, +Z, -Z)
-			Func<IChunkData, int, int, int, short> currentExternalBlockResolver = (c, x, y, z) => {
-				int neighborIndex = -1;
-				int localX = x, localY = y, localZ = z;
-				int s = originalSize; // Use originalSize for neighbor lookup
-
-				if (x >= s) {
-					neighborIndex = 0;
-					localX = x - s;
-				} // +X
-				else if (x < 0) {
-					neighborIndex = 1;
-					localX = x + s;
-				} // -X
-				else if (y >= s) {
-					neighborIndex = 2;
-					localY = y - s;
-				} // +Y
-				else if (y < 0) {
-					neighborIndex = 3;
-					localY = y + s;
-				} // -Y
-				else if (z >= s) {
-					neighborIndex = 4;
-					localZ = z - s;
-				} // +Z
-				else if (z < 0) {
-					neighborIndex = 5;
-					localZ = z + s;
-				} // -Z
-
-				if (neighborIndex != -1 && neighbors != null && neighbors.Length > neighborIndex && neighbors[neighborIndex] != null) {
-					return neighbors[neighborIndex].GetBlockType(neighbors[neighborIndex].GetBlockIndex(new Vector3(localX, localY, localZ)));
-				}
-				return 0; // Default to air if no neighbor or invalid access
-			};
-
-
-			for(int z = 0; z < newSize; z++) {
-				for(int y = 0; y < newSize; y++) {
-					for(int x = 0; x < newSize; x++) {
-						bool isSolid = false;
-						for(int dz = 0; dz < downsampleFactor; dz++) {
-							for(int dy = 0; dy < downsampleFactor; dy++) {
-								for(int dx = 0; dx < downsampleFactor; dx++) {
-									int originalX = x * downsampleFactor + dx;
-									int originalY = y * downsampleFactor + dy;
-									int originalZ = z * downsampleFactor + dz;
-
-									ushort blockType;
-									if (originalX < 0 ||
-									    originalX >= originalSize ||
-									    originalY < 0 ||
-									    originalY >= originalSize ||
-									    originalZ < 0 ||
-									    originalZ >= originalSize) {
-										// Query from neighbor if out of bounds
-										blockType = (ushort)currentExternalBlockResolver(originalChunk, originalX, originalY, originalZ);
-									}
-									else {
-										blockType = (ushort)originalChunk.GetBlockType(originalChunk.GetBlockIndex(new Vector3(originalX, originalY, originalZ)));
-									}
-
-									if (blockType != 0) {
-										isSolid = true;
-										break;
-									}
-								}
-								if (isSolid) break;
-							}
-							if (isSolid) break;
-						}
-						if (isSolid) {
-							// Set a default solid block type (e.g., 1)
-							downsampledBlocks[x + y * newSize + z * newSize * newSize] = 1;
-						}
-						else {
-							downsampledBlocks[x + y * newSize + z * newSize * newSize] = 0; // Air
-						}
-					}
-				}
-			}
-
-			return new DownsampledChunkData(downsampledBlocks, newSize);
 		}
 
 		[BurstCompile]
