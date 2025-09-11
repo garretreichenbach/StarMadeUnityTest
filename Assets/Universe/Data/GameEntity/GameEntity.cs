@@ -1,6 +1,5 @@
 using System;
 using UnityEngine;
-using Universe.Data.Chunk;
 
 namespace Universe.Data.GameEntity {
     
@@ -23,7 +22,7 @@ namespace Universe.Data.GameEntity {
                 SectorID = sectorID;
             }
         }
-        
+
         public readonly GameEntityType Type;
         public int ID;
         public bool loaded;
@@ -36,6 +35,10 @@ namespace Universe.Data.GameEntity {
         public int chunkCount;
         public int triangleCount;
         public int vertexCount;
+
+        public GameEntity(int sectorID) {
+            ID = _idCounter++;
+        }
 
         public Chunk.Chunk[] Chunks {
             get => _chunks;
