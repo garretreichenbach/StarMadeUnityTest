@@ -14,10 +14,9 @@ namespace Dev.Testing.Galaxy {
 		void Update() {
 			Universe.World.Galaxy galaxy = Universe.World.Galaxy.Instance;
 			if(galaxy != null) {
-				var loadedSectorMap = galaxy.LoadedSectors;
-				for(int i = 0; i < loadedSectorMap.Count; i++) {
+				for(int i = 0; i < galaxy.LoadedSectors.Count; i++) {
 					int sectorID = -1;
-					foreach(var id in loadedSectorMap) {
+					foreach(var id in galaxy.LoadedSectors) {
 						sectorID = id;
 						break;
 					}

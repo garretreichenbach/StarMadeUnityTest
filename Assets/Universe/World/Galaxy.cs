@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 
 namespace Universe.World {
@@ -6,11 +7,21 @@ namespace Universe.World {
 		public long seed;
 		public Vector3 systemPosition;
 		public static Galaxy Instance { get; set; }
-		public readonly System.Collections.Generic.HashSet<int> LoadedSectors = new();
+		public System.Collections.Generic.HashSet<int> LoadedSectors;
 
 		public Galaxy(long seed, Vector3 systemPosition) {
 			this.seed = seed;
 			this.systemPosition = systemPosition;
+		}
+
+		void Start() {
+			Instance = this;
+			LoadedSectors = new System.Collections.Generic.HashSet<int>();
+			int initialSectorID = (int)(systemPosition.x / Sector.Sector.SectorSize) + 
+			                      ((int)(systemPosition.y / Sector.Sector.SectorSize) * 16) + 
+			                      ((int)(systemPosition.z / Sector.Sector.SectorSize) * 256);
+			LoadSector(initialSectorID, true);
+			Debug.Log("Galaxy started with seed: " + seed + " at position: " + systemPosition);
 		}
 
 		public void LoadSector(int sectorID, bool loadSurrounding) {
