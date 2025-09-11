@@ -42,7 +42,7 @@ namespace Universe.Data.Chunk {
 		public static readonly int DataMask = (1 << DataBits) - 1; // Mask
 		public static readonly int DataMaskInverted = ~DataMask; // Inverted mask for block-specific data
 
-		private byte Version => 8; // Version of the chunk data structure
+		byte Version => 8; // Version of the chunk data structure
 
 		public long Index;
 		public NativeArray<int> Data;
