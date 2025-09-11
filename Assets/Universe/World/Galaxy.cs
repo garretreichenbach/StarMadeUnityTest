@@ -23,7 +23,7 @@ namespace Universe.World {
 			// Todo: Implement sector loading logic from db, for now just create new sector
 			Debug.Log("Loading sector: " + sectorID + " with surrounding: " + loadSurrounding);
 			GameObject sectorObject = new GameObject("Sector_" + sectorID);
-			sectorObject.transform.parent = this.transform;
+			sectorObject.transform.parent = transform;
 			sectorObject.transform.position = new Vector3((sectorID % 16) * Sector.Sector.SectorSize, ((sectorID / 16) % 16) * Sector.Sector.SectorSize, (sectorID / 256) * Sector.Sector.SectorSize);
 			sectorObject.AddComponent<Sector.Sector>();
 			LoadedSectors.Add(sectorID);
