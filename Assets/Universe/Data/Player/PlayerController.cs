@@ -11,6 +11,7 @@ namespace Universe.Data.Player {
 		private int _currentSectorID = -1;
 		private int _factionID = -1;
 		private PlayerControlState _controlState;
+		private bool _initialized;
 
 		public struct PlayerControlState {
 			// The entity the player is currently controlling (ship, station, etc), -1 if on foot
@@ -24,7 +25,7 @@ namespace Universe.Data.Player {
 			public int LastEnteredBlockIndex;
 		}
 
-		public PlayerController(int playerStateID, String playerName) {
+		public void initialize(int playerStateID, String playerName) {
 			_playerStateID = playerStateID;
 			_playerName = playerName;
 			_controlState = new PlayerControlState {
@@ -32,12 +33,36 @@ namespace Universe.Data.Player {
 				CurrentAlignedEntityID = -1,
 				LastEnteredBlockIndex = -1
 			};
+			_initialized = true;
 		}
 
 		void Start() {
 			
 		}
 
-		void Update() { }
+		void Update() {
+			if(!_initialized) {
+				return;
+			}
+			
+			// Update player state, load/unload sectors as needed based on player position
+			// For now, we only have to ask the galaxy to load sectors around the player
+			CheckSectorTransition();
+		}
+
+		private void CheckSectorTransition() {
+			int sectorSize = World.Sector.Sector.SectorSize;
+			Vector3 playerPosition = transform.position;
+			int newSectorX = Mathf.FloorToInt(playerPosition.x / sectorSize);
+			int newSectorY = Mathf.FloorToInt(playerPosition.y / sectorSize);
+			int newSectorZ = Mathf.FloorToInt(playerPosition.z / sectorSize);
+			int newSectorID = newSectorX + newSectorY * 1000 + newSectorZ * 1000000;
+			if(newSectorID != _currentSectorID) {
+				// Player has moved to a new sector
+				_currentSectorID = newSectorID;
+				World.Galaxy.Instance.LoadSector(_currentSectorID, true);
+				Debug.Log("Player moved to sector: " + _currentSectorID);
+			}
+		}
 	}
 }
