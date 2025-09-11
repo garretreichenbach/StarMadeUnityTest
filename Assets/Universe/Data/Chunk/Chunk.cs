@@ -8,6 +8,7 @@ namespace Universe.Data.Chunk {
 	public struct Chunk {
 		//How many blocks each chunk holds on each axis (32x32x32 = 32768 blocks)
 		public static readonly int ChunkSize = 32;
+		public long seed;
 		public IChunkData Data;
 	}
 
