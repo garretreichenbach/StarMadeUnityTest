@@ -70,6 +70,9 @@ namespace Dev.Testing.Terrain {
 			// Build the mesh
 			var chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
 			chunkGenQueue.RequestMeshRebuild(entity);
+
+			// Clean up chunk data (same as original)
+			CleanupChunkData(entity, chunksTotal);
 		}
 
 		void GenerateChunksFromSeeds(GameEntity entity) {
@@ -83,7 +86,7 @@ namespace Dev.Testing.Terrain {
 
 				// Create chunk data
 				unsafe {
-					var chunkData = new ChunkDataV8(i);
+					var chunkData = new ChunkDataV8(i, ChunkAllocator.Allocate(Chunk.ChunkSize));
 
 					// Generate using seed-based generation
 					SeedBasedTerrainGenerator.GenerateChunk(
@@ -146,9 +149,18 @@ namespace Dev.Testing.Terrain {
 
 				int neighborIndex = cx + cy * chunkDimensions.x + cz * chunkDimensions.x * chunkDimensions.y;
 				var neighborChunk = entity.Chunks[neighborIndex].Data;
-				int bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
+				long bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
+		}
+
+		void CleanupChunkData(GameEntity entity, int chunksTotal) {
+			// Clean up allocated memory (same as original)
+			for(var i = 0; i < chunksTotal; i++) {
+				unsafe {
+					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data, Chunk.ChunkSize);
+				}
+			}
 		}
 
 		/// <summary>
@@ -181,6 +193,9 @@ namespace Dev.Testing.Terrain {
 			// Build mesh
 			var chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
 			chunkGenQueue.RequestMeshRebuild(entity2);
+
+			// Clean up
+			CleanupChunkData(entity2, entity2.TotalChunks);
 
 			Debug.Log("Determinism test complete - check that both asteroids look identical!");
 		}

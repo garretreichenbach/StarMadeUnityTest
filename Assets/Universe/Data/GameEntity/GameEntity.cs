@@ -92,56 +92,8 @@ namespace Universe.Data.GameEntity {
 
         public bool isDirty = false;
 
-        /// <summary>
-        /// Rebuild mesh using automatic LOD based on camera distance
-        /// </summary>
         public void RebuildMesh() {
-            // Find LOD manager if not cached
-            if (_lodManager == null) {
-                _lodManager = FindObjectOfType<ChunkLODManager>();
-            }
-
-            if (_lodManager != null) {
-                // Calculate distance to active camera
-                var camera = GetActiveCamera();
-                if (camera != null) {
-                    float distance = Vector3.Distance(camera.transform.position, transform.position);
-                    int lodLevel = _lodManager.GetLODLevelForDistance(distance);
-
-                    Debug.Log($"RebuildMesh: Distance={distance:F1}, LOD={lodLevel}, Camera={camera.name}");
-                    this.RebuildMeshAtLOD(lodLevel);
-                    return;
-                }
-            }
-
-            // Fallback to high detail if no LOD manager
-            Debug.Log("RebuildMesh: Fallback to LOD 0 (no LOD manager or camera)");
-            this.RebuildMeshAtLOD(0);
-        }
-
-        /// <summary>
-        /// Get the currently active camera (Scene camera in editor, or main camera in play mode)
-        /// </summary>
-        Camera GetActiveCamera() {
-#if UNITY_EDITOR
-            // In editor, prefer Scene view camera when not playing
-            if (!Application.isPlaying) {
-                var sceneView = UnityEditor.SceneView.lastActiveSceneView;
-                if (sceneView != null && sceneView.camera != null) {
-                    return sceneView.camera;
-                }
-            }
-
-            // If playing in editor, try Scene view camera first, then main camera
-            if (Application.isPlaying) {
-                var sceneView = UnityEditor.SceneView.lastActiveSceneView;
-                if (sceneView != null && sceneView.camera != null) {
-                    return sceneView.camera;
-                }
-            }
-#endif
-            // Fall back to main camera
-            return Camera.main;
+            this.RebuildMeshAtLOD(4);
         }
     }
 

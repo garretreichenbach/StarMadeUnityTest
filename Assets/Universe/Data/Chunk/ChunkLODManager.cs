@@ -39,10 +39,10 @@ namespace Universe.Data.LOD {
 		// LOD levels definition
 		private readonly LODLevel[] lodLevels = {
 			new LODLevel { distance = 0f, faceSize = 1, name = "High Detail" },
-			new LODLevel { distance = 64f, faceSize = 128, name = "Medium Detail" },
-			new LODLevel { distance = 128f, faceSize = 256, name = "Low Detail" },
-			new LODLevel { distance = 256f, faceSize = 512, name = "Very Low Detail" },
-			new LODLevel { distance = 512f, faceSize = 1024, name = "Ultra Low Detail" }
+			new LODLevel { distance = 64f, faceSize = 2, name = "Medium Detail" },
+			new LODLevel { distance = 128f, faceSize = 4, name = "Low Detail" },
+			new LODLevel { distance = 256f, faceSize = 8, name = "Very Low Detail" },
+			new LODLevel { distance = 512f, faceSize = 16, name = "Ultra Low Detail" }
 		};
 
 		private Camera mainCamera;

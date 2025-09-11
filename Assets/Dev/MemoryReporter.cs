@@ -13,7 +13,7 @@ namespace Dev {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			long memory = System.GC.GetTotalMemory(false) / (1024 * 1024);
+			long memory = ChunkAllocator.TotalAllocatedMemory / 1048576;
 			return displayMode.HasFlag(StatsDisplay.DisplayMode.MemoryStats) ? $"Chunk Memory: {memory} MB" : "";
 		}
 
