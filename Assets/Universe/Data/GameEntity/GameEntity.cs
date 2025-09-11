@@ -87,6 +87,8 @@ namespace Universe.Data.GameEntity {
             return _chunks[0];
         }
 
+        public bool isDirty = false;
+
         public void RebuildMesh() {
             var combine = new CombineInstance[_chunks.Length];
             blockCount = 0;
