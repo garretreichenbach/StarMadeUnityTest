@@ -26,21 +26,18 @@ namespace Dev.Testing.Terrain {
 		public bool testDeterminism = true;
 
 		void Start() {
-			// Initialize asteroid settings to match your current TerrainTest defaults
 			if (asteroidSettings == null) {
 				asteroidSettings = AsteroidGenerationSettings.CreateDefault(chunkDimensions);
 			}
 
 			GenerateTestAsteroid();
 
-			// Test determinism by generating the same thing twice
 			if (testDeterminism) {
 				StartCoroutine(TestDeterminismCoroutine());
 			}
 		}
 
 		void GenerateTestAsteroid() {
-			// Create the game entity (same as your original TerrainTest)
 			GameEntity entity = new GameObject("SeedBasedTestAsteroid").AddComponent<Asteroid>();
 			entity.LoadDataFromDB(new GameEntity.GameEntityData {
 				Type = GameEntityType.Asteroid,
@@ -58,7 +55,6 @@ namespace Dev.Testing.Terrain {
 			entity.TotalChunks = chunksTotal;
 			entity.LoadInSector(0);
 
-			// Set up cross-chunk block resolver (same as original)
 			SetupCrossChunkResolver(entity);
 
 			// Generate chunks using seed-based generation
@@ -67,9 +63,6 @@ namespace Dev.Testing.Terrain {
 			// Build the mesh
 			var chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
 			chunkGenQueue.RequestMeshRebuild(entity);
-
-			// Clean up chunk data (same as original)
-			CleanupChunkData(entity, chunksTotal);
 		}
 
 		void GenerateChunksFromSeeds(GameEntity entity) {
@@ -82,21 +75,19 @@ namespace Dev.Testing.Terrain {
 				var chunkZ = i / (chunkDimensions.x * chunkDimensions.y);
 
 				// Create chunk data
-				unsafe {
-					var chunkData = new ChunkDataV8(i, ChunkAllocator.Allocate(Chunk.ChunkSize));
+				var chunkData = new ChunkDataV8(i);
 
-					// Generate using seed-based generation
-					SeedBasedTerrainGenerator.GenerateChunk(
-						chunkData,
-						chunkX,
-						chunkY,
-						chunkZ,
-						worldSeed,
-						asteroidSettings
-					);
+				// Generate using seed-based generation
+				SeedBasedTerrainGenerator.GenerateChunk(
+					chunkData,
+					chunkX,
+					chunkY,
+					chunkZ,
+					worldSeed,
+					asteroidSettings
+				);
 
-					entity.Chunks[i] = new Chunk { Data = chunkData };
-				}
+				entity.Chunks[i] = new Chunk { Data = chunkData };
 
 				// Log the seed for this chunk for debugging
 				long chunkSeed = SeedBasedTerrainGenerator.GetChunkSeed(chunkX, chunkY, chunkZ, worldSeed);
@@ -146,18 +137,9 @@ namespace Dev.Testing.Terrain {
 
 				int neighborIndex = cx + cy * chunkDimensions.x + cz * chunkDimensions.x * chunkDimensions.y;
 				var neighborChunk = entity.Chunks[neighborIndex].Data;
-				long bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
+				int bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
-		}
-
-		void CleanupChunkData(GameEntity entity, int chunksTotal) {
-			// Clean up allocated memory (same as original)
-			for(var i = 0; i < chunksTotal; i++) {
-				unsafe {
-					ChunkAllocator.Free(((ChunkDataV8)entity.Chunks[i].Data).Data, Chunk.ChunkSize);
-				}
-			}
 		}
 
 		/// <summary>
@@ -190,9 +172,6 @@ namespace Dev.Testing.Terrain {
 			// Build mesh
 			var chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
 			chunkGenQueue.RequestMeshRebuild(entity2);
-
-			// Clean up
-			CleanupChunkData(entity2, entity2.TotalChunks);
 
 			Debug.Log("Determinism test complete - check that both asteroids look identical!");
 		}

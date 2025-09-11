@@ -60,7 +60,7 @@ namespace Universe.Data.Generation {
 						int worldZ = worldOffsetZ + z;
 
 						// Block index within chunk
-						long blockIndex = chunkData.GetBlockIndex(new Vector3(x, y, z));
+						int blockIndex = chunkData.GetBlockIndex(new Vector3(x, y, z));
 
 						// Generate block type using asteroid generation logic
 						short blockType = GenerateAsteroidBlock(

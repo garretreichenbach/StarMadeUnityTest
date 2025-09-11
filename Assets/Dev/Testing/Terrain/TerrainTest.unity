@@ -245,13 +245,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 42cadf4b0d7edae4483e422a5c3209cc, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  lodDistanceScale: 64
-  minFaceSizeNear: 1
-  maxFaceSizeFar: 8
-  maxLODDistance: 500
-  updateInterval: 0.5
-  maxRebuildsPerFrame: 2
-  debugVisualization: 0
 --- !u!4 &42110180
 Transform:
   m_ObjectHideFlags: 0
@@ -639,7 +632,6 @@ GameObject:
   m_Component:
   - component: {fileID: 2073365874}
   - component: {fileID: 2073365875}
-  - component: {fileID: 2073365876}
   m_Layer: 0
   m_Name: TerrainTest
   m_TagString: Dev
@@ -685,27 +677,6 @@ MonoBehaviour:
     surfaceThickness: 10
     shapeDistortion: 10
   testDeterminism: 0
---- !u!114 &2073365876
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2073365872}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: ffec28dc1d784de58bb1f31bec03109f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  enableLODTesting: 1
-  testAllLODLevels: 1
-  showPerformanceComparison: 1
-  updateInterval: 2
-  immediateRebuilds: 1
-  manualLODLevel: 2
-  forceManualRebuild: 1
-  testCameraDetection: 1
-  enableCameraMovement: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
