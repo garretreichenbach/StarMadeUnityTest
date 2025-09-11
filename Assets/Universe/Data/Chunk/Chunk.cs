@@ -44,7 +44,6 @@ namespace Universe.Data.Chunk {
 		byte Version => 8; // Version of the chunk data structure
 
 		public long Index;
-		// public readonly unsafe int* Data; // Array to hold chunk data
 		public NativeArray<int> Data;
 
 		public ChunkDataV8(long index = 0) {
@@ -105,9 +104,10 @@ namespace Universe.Data.Chunk {
 			return (Data[index] >> DataBitsStart) & DataMask;
 		}
 
-		public void SetBlockData(int index, int data) {
+		public unsafe void SetBlockData(int index, int data) {
 			Data[index] = (Data[index] & DataMaskInverted) | ((data & DataMask) << DataBitsStart);
 		}
+
 		public Vector3 GetBlockPosition(int index) {
 			var size = Chunk.ChunkSize;
 			var x = index % size;
@@ -115,6 +115,7 @@ namespace Universe.Data.Chunk {
 			var z = index / (size * size);
 			return new Vector3(x, y, z);
 		}
+
 		public int GetBlockIndex(Vector3 position) {
 			var size = Chunk.ChunkSize;
 			int x = (int)position.x;
@@ -123,17 +124,19 @@ namespace Universe.Data.Chunk {
 			return x + y * size + z * size * size;
 		}
 
-		public unsafe bool GetBlockActivation(int index) {
+		public bool GetBlockActivation(int index) {
 			if (IsActivatable()) {
 				//Todo: Extract activation from data bits using an external block info lookup
 			}
 			return false;
 		}
 
-		public unsafe bool IsActivatable() {
+		public bool IsActivatable() {
 			//Todo: Check if the block info for this type has activation
 			return true;
 		}
+
+		public int GetSize() { return Chunk.ChunkSize; }
 	}
 
 	public interface IChunkData {
@@ -167,5 +170,6 @@ namespace Universe.Data.Chunk {
 		Vector3 GetBlockPosition(int index);
 
 		int GetBlockIndex(Vector3 position);
+		int GetSize();
 	}
 }
