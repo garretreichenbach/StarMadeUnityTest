@@ -23,8 +23,40 @@ namespace Universe.Data.GameEntity {
 				var chunk = entity.Chunks[i];
 				var chunkPos = entity.GetChunkPosition(i);
 
-				// Use ChunkBuilder with forced LOD level
-				var result = ChunkBuilder.BuildChunkAtLOD(chunk.Data, chunkPos, lodLevel);
+				// Calculate chunk coordinates within the entity
+				int cx = i % entity.chunkDimensions.x;
+				int cy = (i / entity.chunkDimensions.x) % entity.chunkDimensions.y;
+				int cz = i / (entity.chunkDimensions.x * entity.chunkDimensions.y);
+
+				IChunkData[] neighbors = new IChunkData[6]; // +X, -X, +Y, -Y, +Z, -Z
+
+				// Helper to get chunk data at a relative coordinate
+				System.Func<int, int, int, IChunkData> getChunkDataAtRelativeCoord = (relX, relY, relZ) => {
+					int absX = cx + relX;
+					int absY = cy + relY;
+					int absZ = cz + relZ;
+
+					if (absX >= 0 &&
+					    absX < entity.chunkDimensions.x &&
+					    absY >= 0 &&
+					    absY < entity.chunkDimensions.y &&
+					    absZ >= 0 &&
+					    absZ < entity.chunkDimensions.z) {
+						int neighborIndex = absX + absY * entity.chunkDimensions.x + absZ * entity.chunkDimensions.x * entity.chunkDimensions.y;
+						return entity.Chunks[neighborIndex].Data;
+					}
+					return null; // Outside entity bounds, treat as air
+				};
+
+				neighbors[0] = getChunkDataAtRelativeCoord(1, 0, 0); // +X
+				neighbors[1] = getChunkDataAtRelativeCoord(-1, 0, 0); // -X
+				neighbors[2] = getChunkDataAtRelativeCoord(0, 1, 0); // +Y
+				neighbors[3] = getChunkDataAtRelativeCoord(0, -1, 0); // -Y
+				neighbors[4] = getChunkDataAtRelativeCoord(0, 0, 1); // +Z
+				neighbors[5] = getChunkDataAtRelativeCoord(0, 0, -1); // -Z
+
+				// Use ChunkBuilder with forced LOD level and neighbors
+				var result = ChunkBuilder.BuildChunkAtLOD(chunk.Data, chunkPos, neighbors, lodLevel);
 
 				combine[i].mesh = result.mesh;
 				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
@@ -89,60 +121,6 @@ namespace Universe.Data.GameEntity {
 			};
 		}
 
-		/// <summary>
-		/// Rebuild mesh with performance monitoring
-		/// </summary>
-		public static ChunkBuildResult RebuildMeshWithStats(this GameEntity entity) {
-			var startTime = Time.realtimeSinceStartup;
-
-			if (entity.Chunks == null) {
-				return new ChunkBuildResult {
-					mesh = new Mesh(),
-					vertexCount = 0,
-					triangleCount = 0,
-					blockCount = 0,
-					faceCount = 0,
-					lodLevel = 0,
-					buildTime = 0f
-				};
-			}
-
-			var combine = new CombineInstance[entity.Chunks.Length];
-			entity.blockCount = 0;
-			entity.chunkCount = entity.Chunks.Length;
-			entity.triangleCount = 0;
-			entity.vertexCount = 0;
-			int totalFaces = 0;
-
-			for(var i = 0; i < entity.Chunks.Length; i++) {
-				var chunk = entity.Chunks[i];
-				var chunkPos = entity.GetChunkPosition(i);
-				var result = ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
-
-				combine[i].mesh = result.mesh;
-				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
-				entity.blockCount += result.blockCount;
-				entity.triangleCount += result.triangleCount;
-				entity.vertexCount += result.vertexCount;
-				totalFaces += result.faceCount;
-			}
-
-			ApplyMeshToEntity(entity, combine);
-			entity.isDirty = false;
-
-			var buildTime = Time.realtimeSinceStartup - startTime;
-
-			return new ChunkBuildResult {
-				mesh = entity.GetComponent<MeshFilter>()?.sharedMesh,
-				vertexCount = entity.vertexCount,
-				triangleCount = entity.triangleCount,
-				blockCount = entity.blockCount,
-				faceCount = totalFaces,
-				lodLevel = -1, // Combined result from multiple chunks
-				buildTime = buildTime
-			};
-		}
-
 		private static void ApplyMeshToEntity(GameEntity entity, CombineInstance[] combine) {
 			var meshFilter = entity.GetComponent<MeshFilter>();
 			if (meshFilter == null) {
@@ -160,10 +138,10 @@ namespace Universe.Data.GameEntity {
 #if UNITY_EDITOR
 				if (!Application.isPlaying) {
 					// In editor, use DestroyImmediate for immediate cleanup
-					UnityEngine.Object.DestroyImmediate(meshFilter.sharedMesh);
+					Object.DestroyImmediate(meshFilter.sharedMesh);
 				} else {
 					// In play mode, use Destroy
-					UnityEngine.Object.Destroy(meshFilter.sharedMesh);
+					Object.Destroy(meshFilter.sharedMesh);
 				}
 #else
 				// In builds, always use Destroy
