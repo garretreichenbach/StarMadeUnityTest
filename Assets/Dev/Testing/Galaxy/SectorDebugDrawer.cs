@@ -11,11 +11,6 @@ namespace Dev.Testing.Galaxy {
 		float sectorSize = 1000f; // Assuming each sector is 1000 units in size
 		int gridSize = 16; // 16x16 grid of sectors
 		
-		
-		void Start() {
-			
-		}
-
 		void Update() {
 			Universe.World.Galaxy galaxy = Universe.World.Galaxy.Instance;
 			if(galaxy != null) {
