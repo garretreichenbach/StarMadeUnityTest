@@ -155,6 +155,22 @@ namespace Universe.Data.GameEntity {
 				meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
 			}
 
+			// Destroy the old mesh to prevent memory leaks and visual artifacts
+			if (meshFilter.sharedMesh != null) {
+#if UNITY_EDITOR
+				if (!Application.isPlaying) {
+					// In editor, use DestroyImmediate for immediate cleanup
+					UnityEngine.Object.DestroyImmediate(meshFilter.sharedMesh);
+				} else {
+					// In play mode, use Destroy
+					UnityEngine.Object.Destroy(meshFilter.sharedMesh);
+				}
+#else
+				// In builds, always use Destroy
+				UnityEngine.Object.Destroy(meshFilter.sharedMesh);
+#endif
+			}
+
 			var mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
 			meshFilter.mesh = mesh;

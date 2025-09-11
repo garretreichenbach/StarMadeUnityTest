@@ -44,15 +44,12 @@ namespace Universe.Data.Chunk {
 		byte Version => 8; // Version of the chunk data structure
 
 		public long Index;
-		public readonly unsafe int* Data; // Array to hold chunk data
+		// public readonly unsafe int* Data; // Array to hold chunk data
+		public NativeArray<int> Data;
 
-		public unsafe ChunkDataV8(long index = 0) {
+		public ChunkDataV8(long index = 0) {
 			Index = index;
-			Data = ChunkAllocator.Allocate(Chunk.ChunkSize);
-		}
-		public unsafe ChunkDataV8(long index, int* data) {
-			Index = index;
-			Data = data;
+			Data = new NativeArray<int>(Chunk.ChunkSize * Chunk.ChunkSize * Chunk.ChunkSize, Allocator.Persistent);
 		}
 
 		public IChunkData MigrateVersion() {
@@ -69,75 +66,64 @@ namespace Universe.Data.Chunk {
 			return arr;
 		}
 
-		public unsafe int* GetRawDataPointer() {
-			return Data;
-		}
-
 		public void SetRawDataArray(int[] data) {
 			throw new NotImplementedException("Direct array access not supported in unsafe chunk data, use SetRawDataPointer instead.");
 		}
-
-		public unsafe void SetRawDataPointer(int* data, int length) {
-			for(var i = 0; i < length; i++) {
-				Data[i] = data[i];
-			}
-		}
-
-		public unsafe int GetRawData(long index) {
+		public int GetRawData(int index) {
 			return Data[index];
 		}
 
-		public unsafe void SetRawData(long index, int value) {
+		public void SetRawData(int index, int value) {
 			Data[index] = value;
 		}
 
-		public unsafe short GetBlockType(long index) {
+		public short GetBlockType(int index) {
 			return (short)(Data[index] & TypeMask);
 		}
 
-		public unsafe void SetBlockType(long index, short type) {
+		public void SetBlockType(int index, short type) {
 			Data[index] = (Data[index] & TypeMaskInverted) | (type & TypeMask);
 		}
 
-		public unsafe short GetBlockHP(long index) {
+		public short GetBlockHP(int index) {
 			return (short)((Data[index] >> HPBitsStart) & HPMask);
 		}
 
-		public unsafe void SetBlockHP(long index, short hp) {
+		public void SetBlockHP(int index, short hp) {
 			Data[index] = (Data[index] & HPMaskInverted) | ((hp & HPMask) << HPBitsStart);
 		}
 
-		public unsafe byte GetBlockOrientation(long index) {
+		public byte GetBlockOrientation(int index) {
 			return (byte)((Data[index] >> OrientationBitsStart) & OrientationMask);
 		}
 
-		public unsafe void SetBlockOrientation(long index, byte orientation) {
+		public void SetBlockOrientation(int index, byte orientation) {
 			Data[index] = (Data[index] & OrientationMaskInverted) | ((orientation & OrientationMask) << OrientationBitsStart);
 		}
 
-		public unsafe int GetBlockData(long index) {
+		public int GetBlockData(int index) {
 			return (Data[index] >> DataBitsStart) & DataMask;
 		}
 
-		public unsafe void SetBlockData(long index, int data) {
+		public void SetBlockData(int index, int data) {
 			Data[index] = (Data[index] & DataMaskInverted) | ((data & DataMask) << DataBitsStart);
 		}
-		public Vector3 GetBlockPosition(long index) {
+		public Vector3 GetBlockPosition(int index) {
 			var size = Chunk.ChunkSize;
-			var x = (int)(index % size);
-			var y = (int)((index / size) % size);
-			var z = (int)(index / (size * size));
+			var x = index % size;
+			var y = (index / size) % size;
+			var z = index / (size * size);
 			return new Vector3(x, y, z);
 		}
-		public long GetBlockIndex(Vector3 position) {
+		public int GetBlockIndex(Vector3 position) {
 			var size = Chunk.ChunkSize;
 			int x = (int)position.x;
 			int y = (int)position.y;
 			int z = (int)position.z;
-			return (long)x + (long)y * size + (long)z * size * size;
+			return x + y * size + z * size * size;
 		}
 
-		public unsafe bool GetBlockActivation(long index) {
+		public unsafe bool GetBlockActivation(int index) {
 			if (IsActivatable()) {
 				//Todo: Extract activation from data bits using an external block info lookup
 			}
@@ -158,28 +144,28 @@ namespace Universe.Data.Chunk {
 
 		void SetRawDataArray(int[] data);
 
-		int GetRawData(long index);
+		int GetRawData(int index);
 
-		void SetRawData(long index, int value);
+		void SetRawData(int index, int value);
 
-		short GetBlockType(long index);
+		short GetBlockType(int index);
 
-		void SetBlockType(long index, short type);
+		void SetBlockType(int index, short type);
 
-		short GetBlockHP(long index);
+		short GetBlockHP(int index);
 
-		void SetBlockHP(long index, short hp);
+		void SetBlockHP(int index, short hp);
 
-		byte GetBlockOrientation(long index);
+		byte GetBlockOrientation(int index);
 
-		void SetBlockOrientation(long index, byte orientation);
+		void SetBlockOrientation(int index, byte orientation);
 
-		int GetBlockData(long index);
+		int GetBlockData(int index);
 
-		void SetBlockData(long index, int data);
+		void SetBlockData(int index, int data);
 
-		Vector3 GetBlockPosition(long index);
+		Vector3 GetBlockPosition(int index);
 
-		long GetBlockIndex(Vector3 position);
+		int GetBlockIndex(Vector3 position);
 	}
 }

@@ -54,8 +54,8 @@ namespace Universe.Data.Chunk {
 
 		[InspectorLabel("Max Face Size")]
 		[Tooltip("Maximum face size for lowest detail LOD")]
-		[Range(4, 32)]
-		public static int LODMaxFaceAtFar = 16;
+		[Range(4, 256)]
+		public static int LODMaxFaceAtFar = 32;
 
 		[Header("Performance")]
 		[InspectorLabel("Enable Multithreading")]
@@ -210,7 +210,6 @@ namespace Universe.Data.Chunk {
 			float t = (float)lodLevel / (LODLevelCount - 1);
 			int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
 
-			// Ensure face size is power of 2 for better meshing
 			faceSize = Mathf.NextPowerOfTwo(faceSize);
 
 			return Mathf.Clamp(faceSize, LODMinFaceAtNear, Math.Min(LODMaxFaceAtFar, ChunkSize));
@@ -396,7 +395,7 @@ namespace Universe.Data.Chunk {
 					if (ExternalBlockResolver != null) {
 						return (ushort)ExternalBlockResolver(chunk, x, y, z);
 					}
-					return 0;
+					return 0; // Always return air block outside chunk for now
 				}
 				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
 			}
