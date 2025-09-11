@@ -49,6 +49,9 @@ namespace Dev.Testing.Terrain {
 				Name = "SeedBasedTestAsteroid",
 			});
 
+			//Add LODAutoRegister
+			entity.gameObject.AddComponent<Graphics.LOD.LODAutoRegister>();
+
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);

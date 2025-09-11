@@ -1,0 +1,42 @@
+#pragma kernel CSMain
+
+StructuredBuffer<int> _VoxelData;
+RWStructuredBuffer<float3> _Vertices;
+RWStructuredBuffer<int> _Triangles;
+
+int _ChunkSize;
+
+// Quad vertices (for a single face, e.g., +Z face)
+static const float3 quadVertices[4] = {
+    float3(0, 0, 1),
+    float3(1, 0, 1),
+    float3(1, 1, 1),
+    float3(0, 1, 1)
+};
+
+// Quad triangles (indices into quadVertices)
+static const int quadTriangles[6] = {
+    0, 1, 2, // First triangle
+    0, 2, 3  // Second triangle
+};
+
+[numthreads(8,8,8)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    int index = id.x + id.y * _ChunkSize + id.z * _ChunkSize * _ChunkSize;
+
+    if (_VoxelData[index] != 0)
+    {
+        int vertexOffset = index * 4;
+        int triangleOffset = index * 6;
+
+        for (int i = 0; i < 4; i++) {
+            _Vertices[vertexOffset + i] = quadVertices[i] + float3(id.x, id.y, id.z);
+        }
+
+        for (int i = 0; i < 6; i++) {
+            _Triangles[triangleOffset + i] = quadTriangles[i] + vertexOffset;
+        }
+    }
+}
+

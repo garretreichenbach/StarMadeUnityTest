@@ -216,6 +216,57 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
+--- !u!1 &42110178
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 42110180}
+  - component: {fileID: 42110179}
+  m_Layer: 0
+  m_Name: ChunkLODManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &42110179
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 42110178}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 42cadf4b0d7edae4483e422a5c3209cc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  lodDistanceScale: 64
+  minFaceSizeNear: 1
+  maxFaceSizeFar: 8
+  maxLODDistance: 500
+  updateInterval: 0.5
+  maxRebuildsPerFrame: 2
+  debugVisualization: 0
+--- !u!4 &42110180
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 42110178}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 110.46557, y: 0.00001, z: -202.69537}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &369893001
 GameObject:
   m_ObjectHideFlags: 0
@@ -935,6 +986,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2073365874}
   - component: {fileID: 2073365875}
+  - component: {fileID: 2073365876}
   m_Layer: 0
   m_Name: TerrainTest
   m_TagString: Dev
@@ -979,7 +1031,25 @@ MonoBehaviour:
     noiseFrequency: 0.035
     surfaceThickness: 10
     shapeDistortion: 10
-  testDeterminism: 1
+  testDeterminism: 0
+--- !u!114 &2073365876
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2073365872}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ffec28dc1d784de58bb1f31bec03109f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableLODTesting: 1
+  testAllLODLevels: 1
+  showPerformanceComparison: 1
+  updateInterval: 2
+  manualLODLevel: 2
+  forceManualRebuild: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
@@ -991,3 +1061,4 @@ SceneRoots:
   - {fileID: 753103988}
   - {fileID: 369893003}
   - {fileID: 1428875399}
+  - {fileID: 42110180}
