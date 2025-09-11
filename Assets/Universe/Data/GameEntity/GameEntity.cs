@@ -1,10 +1,9 @@
 using System;
 using UnityEngine;
 using Universe.Data.Chunk;
-using Universe.Data.LOD;
 
 namespace Universe.Data.GameEntity {
-
+    
     public abstract class GameEntity : MonoBehaviour {
 
         static int _idCounter = 0;
@@ -24,7 +23,7 @@ namespace Universe.Data.GameEntity {
                 SectorID = sectorID;
             }
         }
-
+        
         public readonly GameEntityType Type;
         public int ID;
         public bool loaded;
@@ -37,8 +36,6 @@ namespace Universe.Data.GameEntity {
         public int chunkCount;
         public int triangleCount;
         public int vertexCount;
-
-        private ChunkLODManager _lodManager;
 
         public Chunk.Chunk[] Chunks {
             get => _chunks;
@@ -61,7 +58,7 @@ namespace Universe.Data.GameEntity {
         protected GameEntity(GameEntityType type) {
             Type = type;
         }
-
+        
         protected abstract void Initialize(GameEntityData data);
 
         /**
@@ -75,7 +72,7 @@ namespace Universe.Data.GameEntity {
             asteroid.Initialize(data);
             return asteroid;
         }
-
+        
         public void LoadInSector(int sectorID) {
             try {
                 this.sectorID = sectorID;
@@ -84,7 +81,7 @@ namespace Universe.Data.GameEntity {
                 Debug.LogError("Failed to load entity in sector: " + e.Message);
                 loaded = false;
             }
-        }
+        } 
 
         public Chunk.Chunk GetChunk() {
             return _chunks[0];
@@ -93,10 +90,41 @@ namespace Universe.Data.GameEntity {
         public bool isDirty = false;
 
         public void RebuildMesh() {
-            this.RebuildMeshAtLOD(4);
-        }
-    }
+            var combine = new CombineInstance[_chunks.Length];
+            blockCount = 0;
+            chunkCount = _chunks.Length;
+            triangleCount = 0;
+            vertexCount = 0;
 
+            for (var i = 0; i < _chunks.Length; i++) {
+                var chunk = _chunks[i];
+                var chunkPos = GetChunkPosition(i);
+                var result = Chunk.ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
+                combine[i].mesh = result.mesh;
+                combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
+                blockCount += result.blockCount;
+                triangleCount += result.triangleCount;
+                vertexCount += result.vertexCount;
+            }
+
+            var meshFilter = GetComponent<MeshFilter>();
+            if (meshFilter == null) {
+                meshFilter = gameObject.AddComponent<MeshFilter>();
+            }
+
+            var meshRenderer = GetComponent<MeshRenderer>();
+            if (meshRenderer == null) {
+                meshRenderer = gameObject.AddComponent<MeshRenderer>();
+                meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
+            }
+
+            var mesh = new Mesh();
+            mesh.CombineMeshes(combine, true);
+            meshFilter.mesh = mesh;
+            isDirty = false;
+        } 
+    }
+    
     public enum GameEntityType {
         Ship,
         Station,

@@ -16,214 +16,62 @@ namespace Universe.Data.Chunk {
 		public int vertexCount;
 		public int triangleCount;
 		public int blockCount;
-		public int faceCount;
-		public int lodLevel;
-		public float buildTime;
-	}
-
-	public struct LODInfo {
-		public int faceSize;
-		public int lodLevel;
-		public float distance;
-		public string description;
 	}
 
 	public class ChunkBuilder : MonoBehaviour {
 		// Optional resolver to query blocks outside the local chunk bounds.
+		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
 		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
 
-		// Enhanced LOD control with more granular settings
-		[Header("LOD Settings")]
-		[InspectorLabel("LOD Enabled")]
-		[Tooltip("Enable dynamic LOD based on camera distance")]
-		public static bool LODEnabled = true;
+		// LOD control: defines how aggressively we merge faces based on camera distance.
+		[InspectorLabel("LOD Distance Scale")] [Tooltip("Higher = require more distance before increasing merge size.")]
+		public static float LODDistanceScale = 2f; // higher = require more distance before increasing merge size
 
-		[InspectorLabel("LOD Distance Scale")]
-		[Tooltip("Distance multiplier for LOD calculations - higher = more aggressive LOD")]
-		public static float LODDistanceScale = 64f;
+		[InspectorLabel("LOD Min Face At Near")]
+		[Tooltip("Minimum face size when the chunk is near the camera (lower = more detail).")]
+		public static int LODMinFaceAtNear = ChunkSize; // near chunks keep faces small
 
-		[InspectorLabel("LOD Levels")]
-		[Tooltip("Number of discrete LOD levels (2-8)")]
-		[Range(2, 8)]
-		public static int LODLevelCount = 5;
+		[InspectorLabel("LOD Max Face At Far")]
+		[Tooltip("Maximum face size when the chunk is far from the camera (higher = more detail).")]
+		public static int LODMaxFaceAtFar = 256; // far chunks can merge up to full chunk dimension
 
-		[InspectorLabel("Min Face Size")]
-		[Tooltip("Minimum face size for highest detail LOD")]
-		[Range(1, 4)]
-		public static int LODMinFaceAtNear = 1;
+		//Todo: Faces between chunks arent actually being combined yet, so this setting doesnt do anything!!!
 
-		[InspectorLabel("Max Face Size")]
-		[Tooltip("Maximum face size for lowest detail LOD")]
-		[Range(4, 32)]
-		public static int LODMaxFaceAtFar = 16;
-
-		[Header("Performance")]
-		[InspectorLabel("Enable Multithreading")]
-		[Tooltip("Use Unity Job System for mesh building")]
-		public static bool EnableMultithreading = true;
-
-		[InspectorLabel("Batch Size")]
-		[Tooltip("Number of faces to process per job batch")]
-		public static int JobBatchSize = 64;
-
-		// Performance tracking
-		private static Dictionary<int, float> lodBuildTimes = new Dictionary<int, float>();
-		private static int totalBuilds = 0;
-
-		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition, int? forcedLOD = null) {
-			var startTime = Time.realtimeSinceStartup;
-
+		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition) {
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
 
-			// Determine LOD level and face size
-			LODInfo lodInfo = ComputeLODInfo(chunkPosition, forcedLOD);
-
-			// Generate faces using greedy meshing with LOD-appropriate face size
-			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, lodInfo.faceSize);
+			// Compute a distance-based LOD for greedy meshing. Near = smaller max face, Far = larger max face.
+			int maxFace = ComputeMaxFaceSize(chunkPosition);
+			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
+			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes, maxFace);
 
 			int totalFaces = facePositions.Count;
-			if (totalFaces == 0) {
+			if(totalFaces == 0) {
 				var empty = new Mesh();
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
 				empty.RecalculateBounds();
-
-				var buildTime = Time.realtimeSinceStartup - startTime;
-				return new ChunkBuildResult {
-					mesh = empty,
-					vertexCount = 0,
-					triangleCount = 0,
-					blockCount = 0,
-					faceCount = 0,
-					lodLevel = lodInfo.lodLevel,
-					buildTime = buildTime
-				};
+				return new ChunkBuildResult { mesh = empty, vertexCount = 0, triangleCount = 0, blockCount = 0 };
 			}
 
 			int totalVertexCount = totalFaces * 4;
 			int totalIndexCount = totalFaces * 6;
 
-			Mesh newMesh;
-
-			if (EnableMultithreading && totalFaces > JobBatchSize) {
-				newMesh = BuildMeshWithJobs(facePositions, faceDirs, faceSizes, totalVertexCount, totalIndexCount);
-			}
-			else {
-				newMesh = BuildMeshDirect(facePositions, faceDirs, faceSizes, totalVertexCount, totalIndexCount);
-			}
-
-			var finalBuildTime = Time.realtimeSinceStartup - startTime;
-
-			// Track performance
-			UpdatePerformanceStats(lodInfo.lodLevel, finalBuildTime);
-
-			return new ChunkBuildResult {
-				mesh = newMesh,
-				vertexCount = totalVertexCount,
-				triangleCount = totalIndexCount / 3,
-				blockCount = blockCount,
-				faceCount = totalFaces,
-				lodLevel = lodInfo.lodLevel,
-				buildTime = finalBuildTime
-			};
-		}
-
-		static LODInfo ComputeLODInfo(Vector3 chunkWorldPos, int? forcedLOD = null) {
-			if (!LODEnabled) {
-				return new LODInfo {
-					faceSize = LODMinFaceAtNear,
-					lodLevel = 0,
-					distance = 0f,
-					description = "LOD Disabled"
-				};
-			}
-
-			var cam = GetActiveCamera();
-			if (cam == null) {
-				return new LODInfo {
-					faceSize = LODMaxFaceAtFar,
-					lodLevel = LODLevelCount - 1,
-					distance = float.MaxValue,
-					description = "No Camera"
-				};
-			}
-
-			float distance = Vector3.Distance(cam.transform.position, chunkWorldPos);
-
-			// Use forced LOD if provided
-			if (forcedLOD.HasValue) {
-				int clampedLOD = Mathf.Clamp(forcedLOD.Value, 0, LODLevelCount - 1);
-				int forcedFaceSize = GetFaceSizeForLODLevel(clampedLOD);
-				return new LODInfo {
-					faceSize = forcedFaceSize,
-					lodLevel = clampedLOD,
-					distance = distance,
-					description = $"Forced LOD {clampedLOD}"
-				};
-			}
-
-			// Calculate LOD level based on distance
-			float lodFloat = distance / LODDistanceScale;
-			int lodLevel = Mathf.Clamp((int)lodFloat, 0, LODLevelCount - 1);
-			int faceSize = GetFaceSizeForLODLevel(lodLevel);
-
-			return new LODInfo {
-				faceSize = faceSize,
-				lodLevel = lodLevel,
-				distance = distance,
-				description = $"Auto LOD {lodLevel} (dist: {distance:F1}, cam: {cam.name})"
-			};
-		}
-
-		/// <summary>
-		/// Get the currently active camera (Scene camera in editor, or main camera in play mode)
-		/// </summary>
-		static Camera GetActiveCamera() {
-#if UNITY_EDITOR
-			// In editor, prefer Scene view camera when not playing
-			if (!Application.isPlaying) {
-				var sceneView = UnityEditor.SceneView.lastActiveSceneView;
-				if (sceneView != null && sceneView.camera != null) {
-					return sceneView.camera;
-				}
-			}
-
-			// If playing in editor, try Scene view camera first, then main camera
-			if (Application.isPlaying) {
-				var sceneView = UnityEditor.SceneView.lastActiveSceneView;
-				if (sceneView != null &&
-				    sceneView.camera != null &&
-				    UnityEditor.SceneView.currentDrawingSceneView == sceneView) {
-					return sceneView.camera;
-				}
-			}
-#endif
-			// Fall back to main camera
-			return Camera.main;
-		}
-
-		static int GetFaceSizeForLODLevel(int lodLevel) {
-			if (LODLevelCount <= 1) return LODMinFaceAtNear;
-
-			float t = (float)lodLevel / (LODLevelCount - 1);
-			int faceSize = Mathf.RoundToInt(Mathf.Lerp(LODMinFaceAtNear, LODMaxFaceAtFar, t));
-
-			// Ensure face size is power of 2 for better meshing
-			faceSize = Mathf.NextPowerOfTwo(faceSize);
-
-			return Mathf.Clamp(faceSize, LODMinFaceAtNear, Math.Min(LODMaxFaceAtFar, ChunkSize));
-		}
-
-		static Mesh BuildMeshWithJobs(List<float3> facePositions, List<byte> faceDirs, List<int2> faceSizes,
-			int totalVertexCount, int totalIndexCount) {
-
 			var buildJob = new BuildFacesJob {
-				FacePositions = new NativeArray<float3>(facePositions.ToArray(), Allocator.TempJob),
-				FaceDirs = new NativeArray<byte>(faceDirs.ToArray(), Allocator.TempJob),
-				FaceSizes = new NativeArray<int2>(faceSizes.ToArray(), Allocator.TempJob)
+				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory),
+				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory),
+				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob,
+					NativeArrayOptions.UninitializedMemory)
 			};
+			for(int i = 0; i < facePositions.Count; i++) {
+				buildJob.FacePositions[i] = facePositions[i];
+				buildJob.FaceDirs[i] = faceDirs[i];
+				buildJob.FaceSizes[i] = faceSizes[i];
+			}
 
 			var outputMeshData = Mesh.AllocateWritableMeshData(1);
 			buildJob.OutputMesh = outputMeshData[0];
@@ -235,188 +83,81 @@ namespace Universe.Data.Chunk {
 				new VertexAttributeDescriptor(VertexAttribute.TexCoord0, dimension: 2, stream: 2)
 			);
 
-			var handle = buildJob.Schedule(facePositions.Count, JobBatchSize);
+			var handle = buildJob.Schedule(totalFaces, 32);
 			var newMesh = new Mesh();
 			var sm = new SubMeshDescriptor(0, totalIndexCount) { firstVertex = 0, vertexCount = totalVertexCount };
-
 			handle.Complete();
 
 			buildJob.OutputMesh.subMeshCount = 1;
 			buildJob.OutputMesh.SetSubMesh(0, sm);
 			Mesh.ApplyAndDisposeWritableMeshData(outputMeshData, new[] { newMesh });
-
 			buildJob.FacePositions.Dispose();
 			buildJob.FaceDirs.Dispose();
 			buildJob.FaceSizes.Dispose();
-
 			newMesh.RecalculateBounds();
-			return newMesh;
+
+			return new ChunkBuildResult { mesh = newMesh, vertexCount = totalVertexCount, triangleCount = totalIndexCount / 3, blockCount = blockCount };
 		}
 
-		static Mesh BuildMeshDirect(List<float3> facePositions, List<byte> faceDirs, List<int2> faceSizes,
-			int totalVertexCount, int totalIndexCount) {
-
-			var vertices = new Vector3[totalVertexCount];
-			var normals = new Vector3[totalVertexCount];
-			var uvs = new Vector2[totalVertexCount];
-			var triangles = new int[totalIndexCount];
-
-			for(int i = 0; i < facePositions.Count; i++) {
-				int vStart = i * 4;
-				int tStart = i * 6;
-
-				BuildFace(facePositions[i],
-					faceDirs[i],
-					faceSizes[i],
-					vertices,
-					normals,
-					uvs,
-					triangles,
-					vStart,
-					tStart);
-			}
-
-			var mesh = new Mesh();
-			mesh.SetVertices(vertices);
-			mesh.SetNormals(normals);
-			mesh.SetUVs(0, uvs);
-			mesh.SetTriangles(triangles, 0);
-			mesh.RecalculateBounds();
-
-			return mesh;
-		}
-
-		static void BuildFace(float3 position, byte direction, int2 size,
-			Vector3[] vertices, Vector3[] normals, Vector2[] uvs, int[] triangles,
-			int vStart, int tStart) {
-
-			float3 o = position;
-			int su = size.x;
-			int sv = size.y;
-
-			Vector3 v0, v1, v2, v3;
-			switch (direction) {
-				case 0: // +X
-					v0 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z - 0.5f);
-					v1 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z + su - 0.5f);
-					v2 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
-					v3 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
-					break;
-
-				case 1: // -X
-					v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + su - 0.5f);
-					v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
-					v2 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
-					v3 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
-					break;
-
-				case 2: // +Y
-					v0 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z - 0.5f);
-					v1 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z - 0.5f);
-					v2 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
-					v3 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
-					break;
-
-				case 3: // -Y
-					v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
-					v1 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
-					v2 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z - 0.5f);
-					v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
-					break;
-
-				case 4: // +Z
-					v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f);
-					v1 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f);
-					v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f);
-					v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f);
-					break;
-
-				default: // 5: -Z
-					v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f);
-					v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f);
-					v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f);
-					v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
-					break;
-			}
-
-			vertices[vStart + 0] = v0;
-			vertices[vStart + 1] = v1;
-			vertices[vStart + 2] = v2;
-			vertices[vStart + 3] = v3;
-
-			var normal = GetFaceNormal(direction);
-			normals[vStart + 0] = normal;
-			normals[vStart + 1] = normal;
-			normals[vStart + 2] = normal;
-			normals[vStart + 3] = normal;
-
-			uvs[vStart + 0] = new Vector2(0, 0);
-			uvs[vStart + 1] = new Vector2(1, 0);
-			uvs[vStart + 2] = new Vector2(1, 1);
-			uvs[vStart + 3] = new Vector2(0, 1);
-
-			triangles[tStart + 0] = vStart + 0;
-			triangles[tStart + 1] = vStart + 2;
-			triangles[tStart + 2] = vStart + 1;
-			triangles[tStart + 3] = vStart + 0;
-			triangles[tStart + 4] = vStart + 3;
-			triangles[tStart + 5] = vStart + 2;
-		}
-
-		static Vector3 GetFaceNormal(byte dir) {
-			return dir switch {
-				0 => new Vector3(1, 0, 0),
-				1 => new Vector3(-1, 0, 0),
-				2 => new Vector3(0, 1, 0),
-				3 => new Vector3(0, -1, 0),
-				4 => new Vector3(0, 0, 1),
-				_ => new Vector3(0, 0, -1)
-			};
+		static int ComputeMaxFaceSize(Vector3 chunkWorldPos) {
+			var cam = Camera.main;
+			//Todo: Update this every time the camera moves between chunks
+			if(cam == null) return math.clamp(LODMaxFaceAtFar, 1, ChunkSize);
+			float dist = Vector3.Distance(cam.transform.position, chunkWorldPos);
+			float unit = ChunkSize * LODDistanceScale;
+			int lod = (int)math.floor(dist / math.max(1f, unit));
+			lod = math.clamp(lod, 0, 10);
+			int size = 1 << lod; // 1,2,4,8,...
+			size = math.clamp(size, LODMinFaceAtNear, math.min(LODMaxFaceAtFar, ChunkSize));
+			return size;
 		}
 
 		static int GenerateGreedyFaces(IChunkData chunk, List<float3> positions, List<byte> dirs, List<int2> sizes,
 			int maxFaceSize) {
 			int s = ChunkSize;
-			int blockCount = 0;
-
 			// Count blocks for stats
 			int totalBlocks = s * s * s;
+			int blockCount = 0;
 			for(int i = 0; i < totalBlocks; i++) {
-				if (chunk.GetBlockType(i) != 0) blockCount++;
+				if(chunk.GetBlockType(i) != 0) blockCount++;
 			}
 
-			// Temporary mask arrays for greedy meshing
+			// Temporary mask arrays (short block type)
 			short[][] mask = new short[s][];
 			for(int index = 0; index < s; index++) {
 				mask[index] = new short[s];
 			}
 
 			ushort GetTypeClamped(int x, int y, int z) {
-				if (x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
-					if (ExternalBlockResolver != null) {
+				if(x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
+					// Ask external resolver (neighbor chunks) if available; otherwise treat as air.
+					if(ExternalBlockResolver != null) {
 						return (ushort)ExternalBlockResolver(chunk, x, y, z);
 					}
+
 					return 0;
 				}
+
 				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
 			}
 
 			void GreedySlice(int axis, int sgn) {
-				int W, H;
+				int W, H; // dimensions of the mask (u=W, v=H)
 				for(int i = 0; i < s; i++) {
 					// Build mask for slice i on given axis/sign
-					if (axis == 0) {
+					if(axis == 0) {
 						W = s;
 						H = s; // u=z, v=y at fixed x=i
 						for(int v = 0; v < H; v++)
 						for(int u = 0; u < W; u++) {
-							int x = i, y = v, z = u;
+							int x = i;
+							int y = v;
+							int z = u;
 							ushort a = GetTypeClamped(x, y, z);
 							ushort b = GetTypeClamped(x + sgn, y, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
-					}
-					else if (axis == 1) {
+					} else if(axis == 1) {
 						W = s;
 						H = s; // u=x, v=z at fixed y=i
 						for(int v = 0; v < H; v++)
@@ -426,8 +167,7 @@ namespace Universe.Data.Chunk {
 							ushort b = GetTypeClamped(x, y + sgn, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
-					}
-					else {
+					} else {
 						W = s;
 						H = s; // axis==2, u=x, v=y at fixed z=i
 						for(int v = 0; v < H; v++)
@@ -439,45 +179,43 @@ namespace Universe.Data.Chunk {
 						}
 					}
 
-					// Greedy merge rectangles with LOD-aware max face size
+					// Greedy merge rectangles of same type
 					for(int v = 0; v < s; v++) {
 						for(int u = 0; u < s; u++) {
 							short type = mask[u][v];
-							if (type == 0) continue;
-
-							// Find width with LOD constraint
+							if(type == 0) continue;
 							int w = 1;
-							while (w < maxFaceSize && u + w < s && mask[u + w][v] == type) w++;
-
-							// Find height with LOD constraint
+							while(w < maxFaceSize && u + w < s && mask[u + w][v] == type) w++;
 							int h = 1;
 							bool stop = false;
-							while (h < maxFaceSize && v + h < s && !stop) {
+							while(h < maxFaceSize && v + h < s && !stop) {
 								for(int k = 0; k < w; k++)
-									if (mask[u + k][v + h] != type) {
+									if(mask[u + k][v + h] != type) {
 										stop = true;
 										break;
 									}
-								if (!stop) h++;
+
+								if(!stop) h++;
 							}
 
-							// Clear processed area from mask
+							// Clear mask
 							for(int dv = 0; dv < h; dv++)
 							for(int du = 0; du < w; du++)
 								mask[u + du][v + dv] = 0;
 
-							// Emit face with proper orientation
-							if (axis == 0) {
+							// Emit face
+							if(axis == 0) {
+								// x fixed = i, u=z, v=y
 								positions.Add(new float3(i, v, u));
 								dirs.Add((byte)(sgn > 0 ? 0 : 1));
 								sizes.Add(new int2(w, h));
-							}
-							else if (axis == 1) {
+							} else if(axis == 1) {
+								// y fixed = i, u=x, v=z
 								positions.Add(new float3(u, i, v));
 								dirs.Add((byte)(sgn > 0 ? 2 : 3));
 								sizes.Add(new int2(w, h));
-							}
-							else {
+							} else {
+								// z fixed = i, u=x, v=y
 								positions.Add(new float3(u, v, i));
 								dirs.Add((byte)(sgn > 0 ? 4 : 5));
 								sizes.Add(new int2(w, h));
@@ -487,77 +225,26 @@ namespace Universe.Data.Chunk {
 				}
 			}
 
-			// Process all 6 directions
-			GreedySlice(0, +1); // +X
-			GreedySlice(0, -1); // -X
-			GreedySlice(1, +1); // +Y
-			GreedySlice(1, -1); // -Y
-			GreedySlice(2, +1); // +Z
-			GreedySlice(2, -1); // -Z
-
+			// X axis
+			GreedySlice(0, +1);
+			GreedySlice(0, -1);
+			// Y axis
+			GreedySlice(1, +1);
+			GreedySlice(1, -1);
+			// Z axis
+			GreedySlice(2, +1);
+			GreedySlice(2, -1);
 			return blockCount;
 		}
 
-		static void UpdatePerformanceStats(int lodLevel, float buildTime) {
-			totalBuilds++;
-
-			if (!lodBuildTimes.ContainsKey(lodLevel)) {
-				lodBuildTimes[lodLevel] = buildTime;
-			}
-			else {
-				// Running average
-				lodBuildTimes[lodLevel] = (lodBuildTimes[lodLevel] + buildTime) * 0.5f;
-			}
-		}
-
-		/// <summary>
-		/// Get performance statistics for debugging
-		/// </summary>
-		public static string GetPerformanceStats() {
-			var stats = new System.Text.StringBuilder();
-			stats.AppendLine($"ChunkBuilder Performance Stats:");
-			stats.AppendLine($"Total Builds: {totalBuilds}");
-			stats.AppendLine($"Multithreading: {EnableMultithreading}");
-			stats.AppendLine($"LOD Enabled: {LODEnabled}");
-
-			foreach (var kvp in lodBuildTimes) {
-				stats.AppendLine($"LOD {kvp.Key} Avg Build Time: {kvp.Value * 1000:F2}ms");
-			}
-
-			return stats.ToString();
-		}
-
-		/// <summary>
-		/// Clear performance statistics
-		/// </summary>
-		[ContextMenu("Clear Performance Stats")]
-		public static void ClearPerformanceStats() {
-			lodBuildTimes.Clear();
-			totalBuilds = 0;
-		}
-
-		/// <summary>
-		/// Build chunk with specific LOD level (for debugging)
-		/// </summary>
-		public static ChunkBuildResult BuildChunkAtLOD(IChunkData chunk, Vector3 chunkPosition, int lodLevel) {
-			return BuildChunk(chunk, chunkPosition, lodLevel);
-		}
-
-		/// <summary>
-		/// Get estimated face count for LOD level (for performance prediction)
-		/// </summary>
-		public static int EstimateFaceCountForLOD(int lodLevel, int blockCount) {
-			int faceSize = GetFaceSizeForLODLevel(lodLevel);
-			float reductionFactor = 1f / (faceSize * faceSize);
-			return Mathf.RoundToInt(blockCount * 6 * reductionFactor); // 6 faces per block max
-		}
-
-		[BurstCompile]
+		[BurstCompile] //Disable this if you need to debug stuff
 		struct BuildFacesJob : IJobParallelFor {
 			public Mesh.MeshData OutputMesh;
-			[ReadOnly] public NativeArray<float3> FacePositions;
-			[ReadOnly] public NativeArray<byte> FaceDirs;
-			[ReadOnly] public NativeArray<int2> FaceSizes;
+			[ReadOnly] public NativeArray<float3> FacePositions; // origin cell (x,y,z)
+			[ReadOnly] public NativeArray<byte> FaceDirs; // 0..5 as before
+
+			[ReadOnly]
+			public NativeArray<int2> FaceSizes; // size along the two axes on the face (u = first, v = second)
 
 			public void Execute(int index) {
 				int vStart = index * 4;
@@ -565,8 +252,8 @@ namespace Universe.Data.Chunk {
 				float3 o = FacePositions[index];
 				byte dir = FaceDirs[index];
 				int2 size = FaceSizes[index];
-				int su = size.x;
-				int sv = size.y;
+				int su = size.x; // width along the first axis of the face
+				int sv = size.y; // height along the second axis
 
 				var outputVerts = OutputMesh.GetVertexData<Vector3>();
 				var outputNormals = OutputMesh.GetVertexData<Vector3>(stream: 1);
@@ -574,47 +261,49 @@ namespace Universe.Data.Chunk {
 				var outputTris = OutputMesh.GetIndexData<int>();
 
 				Vector3 v0, v1, v2, v3;
-				switch (dir) {
-					case 0: // +X
+				switch(dir) {
+					case 0: // +X, plane at x + 0.5, u=z, v=y
 						v0 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z - 0.5f);
 						v1 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z + su - 0.5f);
 						v2 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
 						v3 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
 						break;
 
-					case 1: // -X
+					case 1: // -X, plane at x - 0.5, u=z, v=y
 						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + su - 0.5f);
 						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
 						v2 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
 						v3 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
 						break;
 
-					case 2: // +Y
+					case 2: // +Y, plane at y + 0.5, u=x, v=z
 						v0 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z - 0.5f);
 						v1 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z - 0.5f);
 						v2 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
 						v3 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
 						break;
 
-					case 3: // -Y
+					case 3: // -Y, plane at y - 0.5, u=x, v=z
 						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
 						v1 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
 						v2 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z - 0.5f);
 						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
 						break;
 
-					case 4: // +Z
-						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f);
-						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f);
-						v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f);
-						v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f);
+					case 4: // +Z, plane at z + 0.5, u=x, v=y
+						// Match ElementInfo winding so faces point outward
+						v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f); // bottom-left
+						v1 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f); // top-left
+						v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f); // top-right
+						v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f); // bottom-right
 						break;
 
-					default: // 5: -Z
-						v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f);
-						v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f);
-						v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f);
-						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+					default: // 5: -Z, plane at z - 0.5, u=x, v=y
+						// Match ElementInfo winding so faces point outward
+						v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f); // bottom-right
+						v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f); // top-right
+						v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f); // top-left
+						v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f); // bottom-left
 						break;
 				}
 
@@ -622,18 +311,17 @@ namespace Universe.Data.Chunk {
 				outputVerts[vStart + 1] = v1;
 				outputVerts[vStart + 2] = v2;
 				outputVerts[vStart + 3] = v3;
-
 				var n = GetFaceNormal(dir);
 				outputNormals[vStart + 0] = new Vector3(n.x, n.y, n.z);
 				outputNormals[vStart + 1] = new Vector3(n.x, n.y, n.z);
 				outputNormals[vStart + 2] = new Vector3(n.x, n.y, n.z);
 				outputNormals[vStart + 3] = new Vector3(n.x, n.y, n.z);
-
+				// Stretch UVs 0..1 across the merged face
 				outputUVs[vStart + 0] = new Vector2(0, 0);
 				outputUVs[vStart + 1] = new Vector2(1, 0);
 				outputUVs[vStart + 2] = new Vector2(1, 1);
 				outputUVs[vStart + 3] = new Vector2(0, 1);
-
+				// Triangles
 				outputTris[tStart + 0] = vStart + 0;
 				outputTris[tStart + 1] = vStart + 2;
 				outputTris[tStart + 2] = vStart + 1;
@@ -649,9 +337,19 @@ namespace Universe.Data.Chunk {
 					2 => new float3(0, 1, 0),
 					3 => new float3(0, -1, 0),
 					4 => new float3(0, 0, 1),
-					_ => new float3(0, 0, -1),
+					_ => new float3(0, 0, -1)
+				};
+			}
+
+			static Vector2 GetFaceUV(int corner) {
+				return corner switch {
+					0 => new Vector2(0, 0),
+					1 => new Vector2(1, 0),
+					2 => new Vector2(1, 1),
+					_ => new Vector2(0, 1)
 				};
 			}
 		}
+
 	}
 }

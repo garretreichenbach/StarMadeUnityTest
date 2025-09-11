@@ -41,7 +41,7 @@ namespace Universe.Data.Chunk {
 		public static readonly int DataMask = (1 << DataBits) - 1; // Mask
 		public static readonly int DataMaskInverted = ~DataMask; // Inverted mask for block-specific data
 
-		byte Version => 8; // Version of the chunk data structure
+		private byte Version => 8; // Version of the chunk data structure
 
 		public long Index;
 		public readonly unsafe int* Data; // Array to hold chunk data
@@ -60,13 +60,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public int[] GetRawDataArray() {
-			int[] arr = new int[Chunk.ChunkSize * Chunk.ChunkSize * Chunk.ChunkSize];
-			unsafe {
-				for(int i = 0; i < arr.Length; i++) {
-					arr[i] = Data[i];
-				}
-			}
-			return arr;
+			throw new NotImplementedException("Direct array access not supported in unsafe chunk data, use GetRawDataPointer instead.");
 		}
 
 		public unsafe int* GetRawDataPointer() {
