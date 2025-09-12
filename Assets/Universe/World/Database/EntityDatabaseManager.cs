@@ -55,15 +55,7 @@ namespace Universe.World.Database {
 			}
 			var filePath = System.IO.Path.Combine(folderPath, $"{UniverseName}.db");
 			_db = new LiteDatabase($"Filename={filePath};Connection=shared;");
-
-			#region Entity Table
-			var col = _db.GetCollection<GameEntity.GameEntityData>("entities");
-			col.EnsureIndex(x => x.ID);
-			col.EnsureIndex(x => x.Name);
-			col.EnsureIndex(x => x.Type);
-			col.EnsureIndex(x => x.FactionID);
-			col.EnsureIndex(x => x.SectorID);
-			#endregion
+			_db.GetCollection<GameEntity.GameEntityData>("entities");
 		}
 
 		/**
@@ -89,7 +81,14 @@ namespace Universe.World.Database {
 			if(ActiveEntities.ContainsKey(entityID)) {
 				GameEntity.GameEntityData data = ActiveEntities[entityID];
 				if(data.ChunkLoaded) {
-
+					GameEntity entityComp = GetLoadedEntityFromID(entityID);
+					if(entityComp != null) {
+						entityComp.WriteChunkData();
+						data.ChunkLoaded = false;
+						Destroy(entityComp.gameObject);
+					} else {
+						Debug.LogWarning($"Entity ID {entityID} is marked as loaded but could not find the component in the scene.");
+					}
 				}
 				ActiveEntities.Remove(entityID);
 			} else {
