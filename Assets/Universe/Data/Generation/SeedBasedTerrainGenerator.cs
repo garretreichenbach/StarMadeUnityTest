@@ -45,14 +45,14 @@ namespace Universe.Data.Generation {
 			Random random = new Random((int)(chunkSeed & 0x7FFFFFFF));
 
 			// Calculate world position offsets for this chunk
-			int worldOffsetX = chunkX * Chunk.Chunk.ChunkSize;
-			int worldOffsetY = chunkY * Chunk.Chunk.ChunkSize;
-			int worldOffsetZ = chunkZ * Chunk.Chunk.ChunkSize;
+			int worldOffsetX = chunkX * Chunk.ChunkData.ChunkSize;
+			int worldOffsetY = chunkY * Chunk.ChunkData.ChunkSize;
+			int worldOffsetZ = chunkZ * Chunk.ChunkData.ChunkSize;
 
 			// Generate blocks for this chunk
-			for(int x = 0; x < Chunk.Chunk.ChunkSize; x++) {
-				for(int y = 0; y < Chunk.Chunk.ChunkSize; y++) {
-					for(int z = 0; z < Chunk.Chunk.ChunkSize; z++) {
+			for(int x = 0; x < Chunk.ChunkData.ChunkSize; x++) {
+				for(int y = 0; y < Chunk.ChunkData.ChunkSize; y++) {
+					for(int z = 0; z < Chunk.ChunkData.ChunkSize; z++) {
 
 						// World coordinates
 						int worldX = worldOffsetX + x;
@@ -152,7 +152,7 @@ namespace Universe.Data.Generation {
 
 		static void GenerateEmptyChunk(IChunkData chunkData) {
 			// Set all blocks to air (type 0)
-			int totalBlocks = Chunk.Chunk.ChunkSize * Chunk.Chunk.ChunkSize * Chunk.Chunk.ChunkSize;
+			int totalBlocks = Chunk.ChunkData.ChunkSize * Chunk.ChunkData.ChunkSize * Chunk.ChunkData.ChunkSize;
 			for(int i = 0; i < totalBlocks; i++) {
 				chunkData.SetBlockType(i, 0);
 			}
@@ -203,10 +203,10 @@ namespace Universe.Data.Generation {
 		/// </summary>
 		public static AsteroidGenerationSettings CreateDefault(Vector3Int chunkDimensions) {
 			return new AsteroidGenerationSettings {
-				radius = Mathf.Min(chunkDimensions.x, Mathf.Min(chunkDimensions.y, chunkDimensions.z)) * Chunk.Chunk.ChunkSize / 2f - 10f,
-				centerX = chunkDimensions.x * Chunk.Chunk.ChunkSize / 2f,
-				centerY = chunkDimensions.y * Chunk.Chunk.ChunkSize / 2f,
-				centerZ = chunkDimensions.z * Chunk.Chunk.ChunkSize / 2f,
+				radius = Mathf.Min(chunkDimensions.x, Mathf.Min(chunkDimensions.y, chunkDimensions.z)) * Chunk.ChunkData.ChunkSize / 2f - 10f,
+				centerX = chunkDimensions.x * Chunk.ChunkData.ChunkSize / 2f,
+				centerY = chunkDimensions.y * Chunk.ChunkData.ChunkSize / 2f,
+				centerZ = chunkDimensions.z * Chunk.ChunkData.ChunkSize / 2f,
 				noiseFrequency = 0.035f,
 				surfaceThickness = 10f,
 				shapeDistortion = 10f,

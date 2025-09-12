@@ -75,7 +75,7 @@ namespace Dev.Testing.Terrain {
 				var chunkZ = i / (chunkDimensions.x * chunkDimensions.y);
 
 				// Create chunk data
-				var chunkData = new ChunkDataV8(i);
+				var chunkData = new ChukData(i);
 
 				// Generate using seed-based generation
 				SeedBasedTerrainGenerator.GenerateChunk(
@@ -87,7 +87,7 @@ namespace Dev.Testing.Terrain {
 					asteroidSettings
 				);
 
-				entity.Chunks[i] = new Chunk { Data = chunkData };
+				entity.Chunks[i] = new ChukData { Data = chunkData };
 
 				// Log the seed for this chunk for debugging
 				long chunkSeed = SeedBasedTerrainGenerator.GetChunkSeed(chunkX, chunkY, chunkZ, worldSeed);
@@ -98,8 +98,8 @@ namespace Dev.Testing.Terrain {
 		void SetupCrossChunkResolver(GameEntity entity) {
 			// Same cross-chunk resolver logic as original TerrainTest
 			ChunkBuilder.ExternalBlockResolver = (currentChunk, lx, ly, lz) => {
-				int s = Chunk.ChunkSize;
-				var cd = (ChunkDataV8)currentChunk;
+				int s = ChukData.ChunkSize;
+				var cd = (ChukData)currentChunk;
 				int ci = (int)cd.Index;
 				int cx = ci % chunkDimensions.x;
 				int cy = (ci / chunkDimensions.x) % chunkDimensions.y;

@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Universe.Data.Chunk;
 
 namespace Universe.Data.GameEntity {
     
@@ -27,8 +28,9 @@ namespace Universe.Data.GameEntity {
         public int ID;
         public bool loaded;
         protected int sectorID;
-        private int _totalChunks;
-        private Chunk.Chunk[] _chunks;
+        int _totalChunks;
+        ChunkMemoryManager _memoryManager;
+        long[] _chunkIDs;
 
         [Header("Stats")]
         public int blockCount;
@@ -40,13 +42,8 @@ namespace Universe.Data.GameEntity {
             ID = _idCounter++;
         }
 
-        public Chunk.Chunk[] Chunks {
-            get => _chunks;
-        }
+        public IChunkData GetChunkData(long index) {
 
-        public int TotalChunks {
-            get => _totalChunks;
-            set => _totalChunks = value;
         }
 
         public Vector3Int chunkDimensions;
@@ -55,7 +52,7 @@ namespace Universe.Data.GameEntity {
             var chunkX = index % chunkDimensions.x;
             var chunkY = (index / chunkDimensions.x) % chunkDimensions.y;
             var chunkZ = index / (chunkDimensions.x * chunkDimensions.y);
-            return new Vector3(chunkX * Chunk.Chunk.ChunkSize, chunkY * Chunk.Chunk.ChunkSize, chunkZ * Chunk.Chunk.ChunkSize);
+            return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
         }
 
         protected GameEntity(GameEntityType type) {
@@ -79,15 +76,11 @@ namespace Universe.Data.GameEntity {
         public void LoadInSector(int sectorID) {
             try {
                 this.sectorID = sectorID;
-                _chunks = new Chunk.Chunk[_totalChunks];
+                //Todo: Load chunk IDs from DB based on entity ID and sector ID
             } catch(Exception e) {
                 Debug.LogError("Failed to load entity in sector: " + e.Message);
                 loaded = false;
             }
-        } 
-
-        public Chunk.Chunk GetChunk() {
-            return _chunks[0];
         }
 
         public bool isDirty = false;
@@ -102,7 +95,7 @@ namespace Universe.Data.GameEntity {
             for (var i = 0; i < _chunks.Length; i++) {
                 var chunk = _chunks[i];
                 var chunkPos = GetChunkPosition(i);
-                var result = Chunk.ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
+                var result = ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
                 combine[i].mesh = result.mesh;
                 combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
                 blockCount += result.blockCount;

@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering;
-using static Universe.Data.Chunk.Chunk;
+using static Universe.Data.Chunk.ChunkData;
 
 namespace Universe.Data.Chunk {
 	public struct ChunkBuildResult {

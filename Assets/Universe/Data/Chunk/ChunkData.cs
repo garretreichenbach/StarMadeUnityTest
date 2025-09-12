@@ -5,11 +5,29 @@ using UnityEngine;
 
 namespace Universe.Data.Chunk {
 
-	public struct Chunk {
-		//How many blocks each chunk holds on each axis (32x32x32 = 32768 blocks)
-		public static readonly int ChunkSize = 32;
-		public long seed;
-		public IChunkData Data;
+	public struct ChunkHeader {
+		public long ChunkID;
+		public int DataOffset; // Offset in global memory
+		public int DataSize; // Size in bytes
+		public ChunkState State; // Uncompressed/Compressed/GPU_Processing
+		public float LastAccessTime;
+		public byte CompressionLevel;
+	}
+
+	public struct ChunkAllocation {
+		public int GlobalOffset;
+		public int AllocatedSize;
+		public bool IsCompressed;
+		public int EntityID;
+		public int ChunkIndex;
+	}
+
+	public enum ChunkState {
+		Uncompressed,
+		Compressed,
+		GPUCompressing,
+		GPUDecompressing,
+		Unloaded,
 	}
 
 	/**
@@ -18,8 +36,7 @@ namespace Universe.Data.Chunk {
 	 * It mostly keeps the same structure as V7 but combines the activation bits with the data bits, and
 	 * increases the size of the data bits by 1.
 	 */
-	public struct ChunkDataV8 : IComponentData, IChunkData {
-
+	public struct ChunkData : IChunkData {
 		public static readonly int TotalBits = 32; //4 Bytes per block
 
 		public static readonly int TypeBits = 13; // Number of bits for block type (up to 8192 types)
@@ -44,81 +61,57 @@ namespace Universe.Data.Chunk {
 
 		byte Version => 8; // Version of the chunk data structure
 
-		public long Index;
-		public NativeArray<int> Data;
+		long _chunkID;
 
-		public ChunkDataV8(long index = 0) {
-			Index = index;
-			Data = new NativeArray<int>(Chunk.ChunkSize * Chunk.ChunkSize * Chunk.ChunkSize, Allocator.Persistent);
-		}
-		public ChunkDataV8(long index, NativeArray<int> data) {
-			Index = index;
-			Data = data;
+		public ChunkData(long chunkID = 0) {
+			_chunkID = chunkID;
 		}
 
 		public IChunkData MigrateVersion() {
 			throw new NotImplementedException("V8 is the latest version, cannot migrate!");
 		}
 
-		public int[] GetRawDataArray() {
-			return Data.ToArray();
-		}
-		
-		public void SetRawDataArray(int[] data) {
-			if (data.Length != Data.Length) {
-				throw new ArgumentException($"Data array length {data.Length} does not match chunk size {Data.Length}");
-			}
-			Data.CopyFrom(data);
+		public int GetBlockData(int index) {
+			return ChunkMemoryManager.Instance.GetRawData(_chunkID, index);
 		}
 
-		public int GetRawData(int index) {
-			return Data[index];
-		}
-
-		public void SetRawData(int index, int value) {
-			Data[index] = value;
+		public void SetBlockData(int index, int value) {
+			ChunkMemoryManager.Instance.SetRawData(_chunkID, index, value);
 		}
 
 		public short GetBlockType(int index) {
-			return (short)(Data[index] & TypeMask);
+			return (short) (GetBlockData(index) & TypeMask);
 		}
 
 		public void SetBlockType(int index, short type) {
-			Data[index] = (Data[index] & TypeMaskInverted) | (type & TypeMask);
+			SetBlockData(index, (GetBlockData(index) & TypeMaskInverted) | (type & TypeMask));
 		}
 
 		public short GetBlockHP(int index) {
-			return (short)((Data[index] >> HPBitsStart) & HPMask);
+			return (short)((GetBlockData(index) >> HPBitsStart) & HPMask);
 		}
 
 		public void SetBlockHP(int index, short hp) {
-			Data[index] = (Data[index] & HPMaskInverted) | ((hp & HPMask) << HPBitsStart);
+			SetBlockData(index, (GetBlockData(index) & HPMaskInverted) | ((hp & HPMask) << HPBitsStart));
 		}
 
 		public byte GetBlockOrientation(int index) {
-			return (byte)((Data[index] >> OrientationBitsStart) & OrientationMask);
+			return (byte)(GetBlockData(index) >> OrientationBitsStart & OrientationMask);
 		}
 
 		public void SetBlockOrientation(int index, byte orientation) {
-			Data[index] = (Data[index] & OrientationMaskInverted) | ((orientation & OrientationMask) << OrientationBitsStart);
+			SetBlockData(index, (GetBlockData(index) & OrientationMaskInverted) | ((orientation & OrientationMask) << OrientationBitsStart));
 		}
 
-		public int GetBlockData(int index) {
-			return (Data[index] >> DataBitsStart) & DataMask;
-		}
-
-		public void SetBlockData(int index, int data) {
-			Data[index] = (Data[index] & DataMaskInverted) | ((data & DataMask) << DataBitsStart);
-		}
 		public Vector3 GetBlockPosition(int index) {
-			var size = Chunk.ChunkSize;
+			var size = IChunkData.ChunkSize;
 			var x = index % size;
 			var y = (index / size) % size;
 			var z = index / (size * size);
 			return new Vector3(x, y, z);
 		}
 		public int GetBlockIndex(Vector3 position) {
-			var size = Chunk.ChunkSize;
+			var size = IChunkData.ChunkSize;
 			int x = (int)position.x;
 			int y = (int)position.y;
 			int z = (int)position.z;
@@ -136,19 +129,15 @@ namespace Universe.Data.Chunk {
 			//Todo: Check if the block info for this type has activation
 			return true;
 		}
+		public static void Initialize(ChunkMemoryManager chunkMemoryManager) {
+			throw new NotImplementedException();
+		}
 	}
 
 	public interface IChunkData {
+		public static readonly int ChunkSize = 32;
 
 		IChunkData MigrateVersion();
-
-		int[] GetRawDataArray();
-
-		void SetRawDataArray(int[] data);
-
-		int GetRawData(int index);
-
-		void SetRawData(int index, int value);
 
 		short GetBlockType(int index);
 
