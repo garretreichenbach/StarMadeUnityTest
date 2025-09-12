@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Serialization;
 using Universe.Data.Chunk;
 
 namespace Universe.Data.GameEntity {
@@ -25,12 +26,11 @@ namespace Universe.Data.GameEntity {
         }
 
         public readonly GameEntityType Type;
-        public int ID;
+        public int id;
         public bool loaded;
         protected int sectorID;
         int _totalChunks;
-        ChunkMemoryManager _memoryManager;
-        long[] _chunkIDs;
+        public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
         [Header("Stats")]
         public int blockCount;
@@ -39,11 +39,12 @@ namespace Universe.Data.GameEntity {
         public int vertexCount;
 
         public GameEntity(int sectorID) {
-            ID = _idCounter++;
+            id = _idCounter++;
+            this.sectorID = sectorID;
         }
 
         public IChunkData GetChunkData(long index) {
-
+            return Chunks[index];
         }
 
         public Vector3Int chunkDimensions;
@@ -86,16 +87,14 @@ namespace Universe.Data.GameEntity {
         public bool isDirty = false;
 
         public void RebuildMesh() {
-            var combine = new CombineInstance[_chunks.Length];
+            var combine = new CombineInstance[chunkCount];
             blockCount = 0;
-            chunkCount = _chunks.Length;
             triangleCount = 0;
             vertexCount = 0;
 
-            for (var i = 0; i < _chunks.Length; i++) {
-                var chunk = _chunks[i];
+            for (var i = 0; i < chunkCount; i++) {
                 var chunkPos = GetChunkPosition(i);
-                var result = ChunkBuilder.BuildChunk(chunk.Data, chunkPos);
+                var result = ChunkBuilder.BuildChunk(GetChunkData(i), chunkPos);
                 combine[i].mesh = result.mesh;
                 combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
                 blockCount += result.blockCount;
@@ -118,7 +117,12 @@ namespace Universe.Data.GameEntity {
             mesh.CombineMeshes(combine, true);
             meshFilter.mesh = mesh;
             isDirty = false;
-        } 
+        }
+
+        public void AllocateChunks(int chunksTotal) {
+            Chunks = new ChunkData[chunksTotal];
+            chunkCount = chunksTotal;
+        }
     }
     
     public enum GameEntityType {

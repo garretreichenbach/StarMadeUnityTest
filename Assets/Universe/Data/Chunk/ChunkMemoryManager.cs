@@ -49,8 +49,10 @@ namespace Universe.Data.Chunk {
         #region GPU Resources
 
         [Header("GPU Compression")]
-        [SerializeField] private ComputeShader compressionShader;
-        [SerializeField] private ComputeShader decompressionShader;
+        [SerializeField]
+        ComputeShader compressionShader;
+        [SerializeField]
+        ComputeShader decompressionShader;
 
         // GPU buffers for compression operations
         ComputeBuffer _gpuInputBuffer;      // Input data for compression
@@ -116,18 +118,11 @@ namespace Universe.Data.Chunk {
         public static ChunkMemoryManager Instance { get; private set; }
 
         void Awake() {
-            if (Instance != null) {
-                Destroy(gameObject);
-                return;
-            }
             Instance = this;
             DontDestroyOnLoad(gameObject);
 
             InitializeMemoryPools();
             InitializeGPUResources();
-
-            // Initialize static reference for ChunkMemorySlice
-            ChunkData.Initialize(this);
         }
 
         void InitializeMemoryPools() {
@@ -220,9 +215,9 @@ namespace Universe.Data.Chunk {
             return true;
         }
 
-        public bool DeallocateChunk(long chunkID) {
+        public void DeallocateChunk(long chunkID) {
             if (!_allocations.TryGetValue(chunkID, out var allocation)) {
-                return false;
+                return;
             }
 
             // Cancel any active operations on this chunk
@@ -249,8 +244,6 @@ namespace Universe.Data.Chunk {
 
             _allocations.Remove(chunkID);
             _headers.Remove(chunkID);
-
-            return true;
         }
 
         void ClearChunkMemory(int poolIndex) {
@@ -389,7 +382,7 @@ namespace Universe.Data.Chunk {
 
         #region Compression Management
 
-        private bool EnsureChunkAccessible(long chunkID) {
+        bool EnsureChunkAccessible(long chunkID) {
             if (!_allocations.TryGetValue(chunkID, out var allocation)) {
                 Debug.LogError($"Chunk {chunkID} not allocated!");
                 return false;

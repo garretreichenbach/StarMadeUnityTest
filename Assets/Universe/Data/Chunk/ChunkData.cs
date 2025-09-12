@@ -61,10 +61,12 @@ namespace Universe.Data.Chunk {
 
 		byte Version => 8; // Version of the chunk data structure
 
-		long _chunkID;
+		public long _chunkID;
+		public long _seed;
 
-		public ChunkData(long chunkID = 0) {
+		public ChunkData(long chunkID = 0, long seed = 0) {
 			_chunkID = chunkID;
+			_seed = seed;
 		}
 
 		public IChunkData MigrateVersion() {

@@ -6,12 +6,12 @@ namespace Universe.Data.Player {
 	 * Controls player state information and handles loading of sectors near the player.
 	 */
 	public class PlayerController : MonoBehaviour {
-		private int _playerStateID = -1;
-		private String _playerName;
-		private int _currentSectorID = -1;
-		private int _factionID = -1;
-		private PlayerControlState _controlState;
-		private bool _initialized;
+		int _playerStateID = -1;
+		String _playerName;
+		int _currentSectorID = -1;
+		int _factionID = -1;
+		PlayerControlState _controlState;
+		bool _initialized;
 
 		public struct PlayerControlState {
 			// The entity the player is currently controlling (ship, station, etc), -1 if on foot

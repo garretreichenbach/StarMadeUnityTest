@@ -8,4 +8,8 @@ namespace Universe.Data.GameEntity {
 			}
 		}
 	}
+
+	public static class AsteroidFactory {
+
+	}
 }
