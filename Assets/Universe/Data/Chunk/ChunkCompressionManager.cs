@@ -9,7 +9,7 @@ namespace Universe.Data.Chunk {
 	 * Manages GPU-based compression and decompression of chunk data using compute shaders.
 	 * Utilizes AsyncGPUReadback for efficient data transfer between CPU and GPU.
 	 */
-    public class GPUCompressionManager {
+    public class ChunkCompressionManager {
 		// Reference to the memory manager and its GPU resources
 		ChunkMemoryManager MemoryManager {
 			get => ChunkMemoryManager.Instance;

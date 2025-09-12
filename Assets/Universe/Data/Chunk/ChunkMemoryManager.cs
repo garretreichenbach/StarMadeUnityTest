@@ -78,7 +78,7 @@ namespace Universe.Data.Chunk {
 
 		#region GPU Resources
 
-		public GPUCompressionManager CompressionManager = new GPUCompressionManager();
+		public ChunkCompressionManager CompressionManager = new ChunkCompressionManager();
 
 		[Header("GPU Compression")] [SerializeField]
 		public ComputeShader compressionShader;
@@ -316,7 +316,7 @@ namespace Universe.Data.Chunk {
 		#region Block Access Methods
 
 		public int GetRawData(long chunkID, int blockIndex) {
-			if(!EnsureChunkAccessible(chunkID)) {
+			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
 				Debug.LogError($"Cannot access chunk {chunkID} for reading");
 				return 0;
 			}
@@ -328,7 +328,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public void SetRawData(long chunkID, int blockIndex, int rawData) {
-			if(!EnsureChunkAccessible(chunkID)) {
+			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
 				Debug.LogError($"Cannot access chunk {chunkID} for writing");
 				return;
 			}
@@ -341,7 +341,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public int[] GetRawDataArray(long chunkID) {
-			if(!EnsureChunkAccessible(chunkID)) {
+			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
 				return new int[BlocksPerChunk]; // Return empty array
 			}
 
@@ -360,7 +360,7 @@ namespace Universe.Data.Chunk {
 				return;
 			}
 
-			if(!EnsureChunkAccessible(chunkID)) return;
+			if(!EnsureChunkAccessibleAsync(chunkID).Result) return;
 
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
@@ -447,13 +447,13 @@ namespace Universe.Data.Chunk {
 			return false;
 		}
 
-		async Task<bool> CompressChunkAsync(long chunkID) {
+		public async Task<bool> CompressChunkAsync(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
 			}
 
 			if(allocation.State != ChunkState.Uncompressed) {
-				return false; // Can only compress uncompressed chunks
+				return false;
 			}
 
 			// Mark as being compressed
@@ -470,7 +470,7 @@ namespace Universe.Data.Chunk {
 			_activeOperations[chunkID] = operation;
 
 			// Use GPUCompressionManager for actual compression
-			GPUCompressionManager compressionManager = CompressionManager;
+			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
 					CompressedChunk compressedChunk = await compressionManager.CompressChunkAsync(chunkID);
@@ -510,7 +510,7 @@ namespace Universe.Data.Chunk {
 			_activeOperations[chunkID] = operation;
 
 			// Use GPUCompressionManager for actual decompression
-			GPUCompressionManager compressionManager = CompressionManager;
+			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
 					bool result = await compressionManager.DecompressChunkAsync(chunkID);
@@ -568,6 +568,52 @@ namespace Universe.Data.Chunk {
 			}
 
 			return false;
+		}
+
+		/**
+		 * Compresses all chunks belonging to the specified entity and returns the compressed data as a byte array so it can be written to disk.
+		 */
+		public byte[] CompressEntity(GameEntity.GameEntity entity) {
+			var entityData = new System.IO.MemoryStream();
+			foreach(var chunk in entity.Chunks) {
+				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
+					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
+					continue;
+				}
+
+				// Ensure chunk is compressed
+				if(allocation.State == ChunkState.Uncompressed) {
+					var compressTask = CompressChunkAsync(chunk._chunkID);
+					compressTask.Wait();
+					if(!compressTask.Result) {
+						Debug.LogError($"Failed to compress chunk {chunk._chunkID}");
+						continue;
+					}
+				} else if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
+					Debug.LogWarning($"Chunk {chunk._chunkID} is being processed, waiting for compression");
+					WaitForChunkOperation(chunk._chunkID);
+				}
+
+				// Now the chunk should be compressed
+				if(!_allocations.TryGetValue(chunk._chunkID, out allocation) || allocation.State != ChunkState.Compressed) {
+					Debug.LogError($"Chunk {chunk._chunkID} is not compressed after operation");
+					continue;
+				}
+
+				// Read compressed data from pool
+				int offset = allocation.CompressedOffset;
+				int size = allocation.CompressedSize;
+				byte[] compressedData = new byte[size];
+				for(int i = 0; i < size; i++) {
+					compressedData[i] = _compressedPool[offset + i];
+				}
+
+				// Append to entity data
+				entityData.Write(BitConverter.GetBytes(chunk._chunkID), 0, sizeof(long));
+				entityData.Write(BitConverter.GetBytes(size), 0, sizeof(int));
+				entityData.Write(compressedData, 0, size);
+			}
+			return entityData.ToArray();
 		}
 
 		void UpdateCompressionOperations() {

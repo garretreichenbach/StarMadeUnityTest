@@ -1,6 +1,8 @@
 using System;
+using System.Threading.Tasks;
 using UnityEngine;
 using Universe.Data.Chunk;
+using Universe.World.Database;
 
 namespace Universe.Data.GameEntity {
 
@@ -9,13 +11,16 @@ namespace Universe.Data.GameEntity {
 		static int _idCounter;
 
 		[Header("Entity Info")]
-		public int ID => _data.ID;
-		public long DatabaseID => _data.DatabaseID;
-		public GameEntityType Type => _data.Type;
-		public string Name => _data.Name;
-		public int FactionID => _data.FactionID;
-		public int SectorID => _data.SectorID;
-		public bool Loaded => _data.Loaded;
+		public string UID => Data.UID;
+		public int ID => Data.ID;
+		public long DatabaseID => Data.DatabaseID;
+		public GameEntityType Type => Data.Type;
+		public string Name => Data.Name;
+		public int FactionID => Data.FactionID;
+		public int SectorID => Data.SectorID;
+		public bool ChunkLoaded => Data.ChunkLoaded;
+
+		string ChunkDataPath => EntityDatabaseManager.Instance.GetChunkDataPath(DatabaseID);
 
 		[Header("Debug Stats")]
 		public int blockCount;
@@ -26,13 +31,28 @@ namespace Universe.Data.GameEntity {
 		public Vector3Int chunkDimensions;
 		int _totalChunks;
 		public bool isDirty;
-
-		GameEntityData _data;
-
+		public GameEntityData Data;
 		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
 		public GameEntity(GameEntityData data) {
-			_data = data;
+			Data = data;
+		}
+
+		public async Task<bool> WriteChunkData() {
+			if(!ChunkLoaded) {
+				Debug.LogWarning($"Entity {Name} is not loaded. Cannot write chunk data.");
+				return false;
+			}
+			//Compress chunk data
+			byte[] compressedData = ChunkMemoryManager.Instance.CompressEntity(this);
+			//Write to disk
+			bool success = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
+			if(!success) {
+				Debug.LogError($"Failed to write chunk data for entity {Name} to path {ChunkDataPath}");
+				return false;
+			}
+			isDirty = false;
+			return true;
 		}
 
 		public IChunkData GetChunkData(long index) {
@@ -85,15 +105,17 @@ namespace Universe.Data.GameEntity {
 		}
 
 		public struct GameEntityData {
+			public string UID;
 			public GameEntityType Type;
 			public int ID;
 			public long DatabaseID;
 			public string Name;
 			public int FactionID;
 			public int SectorID;
-			public bool Loaded;
+			public bool ChunkLoaded;
 
 			public GameEntityData(GameEntityType type, long databaseID, string name = "", int factionID = 0, int sectorID = 0) : this() {
+				UID = $"Entity_{ID}";
 				Type = type;
 				ID = _idCounter++;
 				DatabaseID = databaseID;

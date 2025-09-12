@@ -1,4 +1,3 @@
-using System.Collections;
 using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.GameEntity;
@@ -17,10 +16,6 @@ namespace Dev.Testing.Terrain {
 		[Header("Asteroid Settings")]
 		public AsteroidGenerationSettings asteroidSettings;
 
-		[Header("Testing")]
-		[Tooltip("If true, generates the same asteroid twice to verify determinism")]
-		public bool testDeterminism;
-
 		void Start() {
 			if(ChunkMemoryManager.Instance == null) {
 				Debug.LogError("GlobalChunkMemoryManager not found! Make sure it's in the scene.");
@@ -32,10 +27,6 @@ namespace Dev.Testing.Terrain {
 			}
 
 			GenerateTestAsteroid();
-
-			if(testDeterminism) {
-				StartCoroutine(TestDeterminismCoroutine());
-			}
 		}
 
 		void OnDestroy() {
@@ -53,13 +44,7 @@ namespace Dev.Testing.Terrain {
 		void GenerateTestAsteroid() {
 			Debug.Log("=== Generating Test Asteroid with Global Memory System ===");
 
-			GameEntity entity = new GameObject("GlobalMemoryTestAsteroid").AddComponent<Asteroid>();
-			entity.LoadDataFromDB(new GameEntity.GameEntityData {
-				Type = GameEntityType.Asteroid,
-				FactionID = 0,
-				SectorID = 0,
-				Name = "GlobalMemoryTestAsteroid",
-			});
+			GameEntity entity = new GameObject("TestAsteroid").AddComponent<Asteroid>();
 
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
@@ -68,7 +53,6 @@ namespace Dev.Testing.Terrain {
 
 			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
 			entity.AllocateChunks(chunksTotal);
-			entity.LoadInSector(0);
 
 			SetupCrossChunkResolver(entity);
 
@@ -199,47 +183,6 @@ namespace Dev.Testing.Terrain {
 				int bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
-		}
-
-		/// <summary>
-		///     Test that the same seed produces identical results using global memory system
-		/// </summary>
-		IEnumerator TestDeterminismCoroutine() {
-			yield return new WaitForSeconds(2f); // Wait for first asteroid to generate
-
-			Debug.Log("=== Testing Determinism with Global Memory System ===");
-
-			GameEntity entity2 = new GameObject("DeterminismTest").AddComponent<Asteroid>();
-			entity2.LoadDataFromDB(new GameEntity.GameEntityData {
-				Type = GameEntityType.Asteroid,
-				FactionID = 0,
-				SectorID = 0,
-				Name = "DeterminismTest",
-			});
-
-			entity2.gameObject.transform.position = new Vector3(200, 0, 0); // Offset position
-			entity2.gameObject.transform.rotation = Quaternion.identity;
-			entity2.gameObject.SetActive(true);
-			entity2.chunkDimensions = chunkDimensions;
-
-			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
-			entity2.AllocateChunks(chunksTotal);
-			entity2.LoadInSector(0);
-
-			// Use the same world seed but different entity (will have different entity.id)
-			SetupCrossChunkResolver(entity2);
-			GenerateChunksWithGlobalMemory(entity2);
-
-			// Build mesh
-			ChunkGenerationQueue chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
-			if(chunkGenQueue != null) {
-				chunkGenQueue.RequestMeshRebuild(entity2);
-			} else {
-				entity2.RebuildMesh();
-			}
-
-			PrintMemoryStatistics("After generating second asteroid for determinism test");
-			Debug.Log("Determinism test complete - check that both asteroids look identical!");
 		}
 
 		void PrintMemoryStatistics(string context) {
