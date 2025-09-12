@@ -1,35 +1,7 @@
 using System;
-using Unity.Collections;
-using Unity.Entities;
 using UnityEngine;
 
 namespace Universe.Data.Chunk {
-
-	public struct ChunkHeader {
-		public long ChunkID;
-		public int DataOffset; // Offset in global memory
-		public int DataSize; // Size in bytes
-		public ChunkState State; // Uncompressed/Compressed/GPU_Processing
-		public float LastAccessTime;
-		public byte CompressionLevel;
-	}
-
-	public struct ChunkAllocation {
-		public int GlobalOffset;
-		public int AllocatedSize;
-		public bool IsCompressed;
-		public int EntityID;
-		public int ChunkIndex;
-	}
-
-	public enum ChunkState {
-		Uncompressed,
-		Compressed,
-		GPUCompressing,
-		GPUDecompressing,
-		Unloaded,
-	}
-
 	/**
 	 * Chunk Data V8 is an unsafe implementation of chunk data storage that uses 4 bytes (32 bits) per block.
 	 * This version is designed to be faster than previous versions.
