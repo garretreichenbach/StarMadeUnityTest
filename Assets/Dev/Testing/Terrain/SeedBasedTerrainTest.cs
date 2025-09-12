@@ -86,7 +86,7 @@ namespace Dev.Testing.Terrain {
 				var chunkY = (i / chunkDimensions.x) % chunkDimensions.y;
 				var chunkZ = i / (chunkDimensions.x * chunkDimensions.y);
 
-				// Generate a unique chunk ID for this entity and chunk index
+				// Generate a unique chunk ID - include entity ID to avoid collisions
 				long chunkID = GenerateChunkID(entity.id, i);
 
 				// Allocate chunk in global memory system
@@ -95,12 +95,15 @@ namespace Dev.Testing.Terrain {
 					continue;
 				}
 
-				// Create ChunkMemorySlice that references the global memory
-				var chunkSlice = new ChunkData(chunkID);
+				// Create ChunkData that references the global memory
+				var chunkData = new ChunkData(chunkID);
+
+				// IMPORTANT: Set the chunk in the entity's array
+				entity.Chunks[i] = chunkData;
 
 				// Generate terrain data directly into global memory
 				SeedBasedTerrainGenerator.GenerateChunk(
-					chunkSlice,
+					chunkData,
 					chunkX,
 					chunkY,
 					chunkZ,
@@ -117,30 +120,35 @@ namespace Dev.Testing.Terrain {
 
 		long GenerateChunkID(int entityID, int chunkIndex) {
 			// Generate a unique chunk ID based on entity ID and chunk index
-			// Use a simple but effective combination that avoids collisions
-			return ((long)entityID << 32) | (uint)chunkIndex;
+			// Use a better approach that ensures uniqueness across all entities
+			long baseID = ((long)entityID << 32) | (uint)chunkIndex;
+
+			// Add world seed to ensure uniqueness across different worlds/sessions
+			long hashedID = baseID ^ (worldSeed >> 16);
+
+			return hashedID;
 		}
 
 		void SetupCrossChunkResolver(GameEntity entity) {
 			Debug.Log("Setting up cross-chunk resolver for global memory system");
 
-			// Updated cross-chunk resolver that works with ChunkMemorySlice
+			// Updated cross-chunk resolver that works with ChunkData
 			ChunkBuilder.ExternalBlockResolver = (currentChunk, lx, ly, lz) => {
 				int s = IChunkData.ChunkSize;
 
-				var currentSlice = (ChunkData)currentChunk;
+				var currentData = (ChunkData)currentChunk;
 
-				// Find which chunk this slice belongs to by searching entity chunks
+				// Find which chunk this corresponds to by searching entity chunks
 				int currentChunkIndex = -1;
 				for(int i = 0; i < entity.Chunks.Length; i++) {
-					if (entity.Chunks[i]._chunkID == currentSlice._chunkID) {
+					if (entity.Chunks[i]._chunkID == currentData._chunkID) {
 						currentChunkIndex = i;
 						break;
 					}
 				}
 
 				if (currentChunkIndex == -1) {
-					Debug.LogError($"Could not find chunk index for chunk ID {currentSlice._chunkID}");
+					Debug.LogError($"Could not find chunk index for chunk ID {currentData._chunkID}");
 					return 0;
 				}
 
@@ -180,6 +188,12 @@ namespace Dev.Testing.Terrain {
 					return 0;
 
 				int neighborIndex = cx + cy * chunkDimensions.x + cz * chunkDimensions.x * chunkDimensions.y;
+
+				// Make sure the neighbor chunk exists
+				if (neighborIndex >= entity.Chunks.Length) {
+					return 0;
+				}
+
 				var neighborChunk = entity.Chunks[neighborIndex];
 				int bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
@@ -206,10 +220,13 @@ namespace Dev.Testing.Terrain {
 			entity2.gameObject.transform.rotation = Quaternion.identity;
 			entity2.gameObject.SetActive(true);
 			entity2.chunkDimensions = chunkDimensions;
-			entity2.chunkCount = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
+
+			var chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
+			entity2.AllocateChunks(chunksTotal);
 			entity2.LoadInSector(0);
 
-			// Generate using same seed but different entity ID
+			// Use the same world seed but different entity (will have different entity.id)
+			SetupCrossChunkResolver(entity2);
 			GenerateChunksWithGlobalMemory(entity2);
 
 			// Build mesh
@@ -223,57 +240,6 @@ namespace Dev.Testing.Terrain {
 
 			PrintMemoryStatistics("After generating second asteroid for determinism test");
 			Debug.Log("Determinism test complete - check that both asteroids look identical!");
-		}
-
-		/// <summary>
-		/// Simulate what would happen in a networked scenario with global memory
-		/// </summary>
-		[ContextMenu("Simulate Network Generation")]
-		void SimulateNetworkGeneration() {
-			Debug.Log("=== Simulating Network Generation with Global Memory ===");
-
-			// Simulate what a client would receive from server
-			var networkChunkData = new[] {
-				// Natural chunks - just send seed and generate locally
-				new NetworkChunkData {
-					chunkX = 0, chunkY = 0, chunkZ = 0,
-					seed = worldSeed,
-					isModified = false,
-					estimatedSize = IChunkData.ChunkSize * IChunkData.ChunkSize * IChunkData.ChunkSize * 4
-				},
-				new NetworkChunkData {
-					chunkX = 1, chunkY = 0, chunkZ = 0,
-					seed = worldSeed,
-					isModified = false,
-					estimatedSize = IChunkData.ChunkSize * IChunkData.ChunkSize * IChunkData.ChunkSize * 4
-				},
-
-				// Modified chunk - would receive compressed data from server
-				new NetworkChunkData {
-					chunkX = 2, chunkY = 0, chunkZ = 0,
-					seed = -1,
-					isModified = true,
-					voxelData = new byte[32768], // Simulated compressed data
-					estimatedSize = 32768
-				}
-			};
-
-			foreach (var chunkData in networkChunkData) {
-				if (chunkData.isModified) {
-					Debug.Log($"Chunk [{chunkData.chunkX},{chunkData.chunkY},{chunkData.chunkZ}] is modified");
-					Debug.Log($"  - Would receive {chunkData.voxelData.Length} bytes of compressed data");
-					Debug.Log($"  - Would allocate chunk ID in global memory");
-					Debug.Log($"  - Would decompress directly into global memory pool");
-					Debug.Log($"  - Network bandwidth: {chunkData.estimatedSize} bytes");
-				}
-				else {
-					long calculatedSeed = SeedBasedTerrainGenerator.GetChunkSeed(chunkData.chunkX, chunkData.chunkY, chunkData.chunkZ, chunkData.seed);
-					Debug.Log($"Chunk [{chunkData.chunkX},{chunkData.chunkY},{chunkData.chunkZ}] - seed: {calculatedSeed}");
-					Debug.Log($"  - Would generate locally using global memory system");
-					Debug.Log($"  - Network bandwidth: 8 bytes (just the seed)");
-					Debug.Log($"  - Local generation into global memory pool");
-				}
-			}
 		}
 
 		void PrintMemoryStatistics(string context) {
@@ -294,16 +260,5 @@ namespace Dev.Testing.Terrain {
 				}
 			}
 		}
-	}
-
-	/// <summary>
-	/// Network data structure for simulating chunk transmission
-	/// </summary>
-	public struct NetworkChunkData {
-		public int chunkX, chunkY, chunkZ;
-		public long seed;
-		public bool isModified;
-		public byte[] voxelData;
-		public int estimatedSize;
 	}
 }
