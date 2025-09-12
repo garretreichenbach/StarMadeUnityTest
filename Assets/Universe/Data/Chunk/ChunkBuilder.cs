@@ -1,14 +1,11 @@
 using System;
 using System.Collections.Generic;
-using Dev;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using Unity.VisualScripting;
 using UnityEngine;
 using UnityEngine.Rendering;
-using static Universe.Data.Chunk.ChunkData;
 
 namespace Universe.Data.Chunk {
 	public struct ChunkBuildResult {
@@ -33,7 +30,7 @@ namespace Universe.Data.Chunk {
 
 			int totalFaces = facePositions.Count;
 			if(totalFaces == 0) {
-				var empty = new Mesh();
+				Mesh empty = new Mesh();
 				empty.SetVertices(new List<Vector3>(0));
 				empty.SetIndices(Array.Empty<int>(), MeshTopology.Triangles, 0, false);
 				empty.RecalculateBounds();
@@ -43,13 +40,10 @@ namespace Universe.Data.Chunk {
 			int totalVertexCount = totalFaces * 4;
 			int totalIndexCount = totalFaces * 6;
 
-			var buildJob = new BuildFacesJob {
-				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob,
-					NativeArrayOptions.UninitializedMemory),
-				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob,
-					NativeArrayOptions.UninitializedMemory),
-				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob,
-					NativeArrayOptions.UninitializedMemory)
+			BuildFacesJob buildJob = new BuildFacesJob {
+				FacePositions = new NativeArray<float3>(facePositions.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
+				FaceDirs = new NativeArray<byte>(faceDirs.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
+				FaceSizes = new NativeArray<int2>(faceSizes.Count, Allocator.TempJob, NativeArrayOptions.UninitializedMemory),
 			};
 			for(int i = 0; i < facePositions.Count; i++) {
 				buildJob.FacePositions[i] = facePositions[i];
@@ -57,19 +51,14 @@ namespace Universe.Data.Chunk {
 				buildJob.FaceSizes[i] = faceSizes[i];
 			}
 
-			var outputMeshData = Mesh.AllocateWritableMeshData(1);
+			Mesh.MeshDataArray outputMeshData = Mesh.AllocateWritableMeshData(1);
 			buildJob.OutputMesh = outputMeshData[0];
 			buildJob.OutputMesh.SetIndexBufferParams(totalIndexCount, IndexFormat.UInt32);
-			buildJob.OutputMesh.SetVertexBufferParams(
-				totalVertexCount,
-				new VertexAttributeDescriptor(VertexAttribute.Position, stream: 0),
-				new VertexAttributeDescriptor(VertexAttribute.Normal, stream: 1),
-				new VertexAttributeDescriptor(VertexAttribute.TexCoord0, dimension: 2, stream: 2)
-			);
+			buildJob.OutputMesh.SetVertexBufferParams(totalVertexCount, new VertexAttributeDescriptor(VertexAttribute.Position, stream: 0), new VertexAttributeDescriptor(VertexAttribute.Normal, stream: 1), new VertexAttributeDescriptor(VertexAttribute.TexCoord0, dimension: 2, stream: 2));
 
-			var handle = buildJob.Schedule(totalFaces, 32);
-			var newMesh = new Mesh();
-			var sm = new SubMeshDescriptor(0, totalIndexCount) { firstVertex = 0, vertexCount = totalVertexCount };
+			JobHandle handle = buildJob.Schedule(totalFaces, 32);
+			Mesh newMesh = new Mesh();
+			SubMeshDescriptor sm = new SubMeshDescriptor(0, totalIndexCount) { firstVertex = 0, vertexCount = totalVertexCount };
 			handle.Complete();
 
 			buildJob.OutputMesh.subMeshCount = 1;
@@ -159,19 +148,21 @@ namespace Universe.Data.Chunk {
 							int h = 1;
 							bool stop = false;
 							while(v + h < s && !stop) {
-								for(int k = 0; k < w; k++)
+								for(int k = 0; k < w; k++) {
 									if(mask[u + k][v + h] != type) {
 										stop = true;
 										break;
 									}
+								}
 
 								if(!stop) h++;
 							}
 
 							// Clear mask
 							for(int dv = 0; dv < h; dv++)
-							for(int du = 0; du < w; du++)
+							for(int du = 0; du < w; du++) {
 								mask[u + du][v + dv] = 0;
+							}
 
 							// Emit face
 							if(axis == 0) {
@@ -226,8 +217,8 @@ namespace Universe.Data.Chunk {
 				int sv = size.y; // height along the second axis
 
 				var outputVerts = OutputMesh.GetVertexData<Vector3>();
-				var outputNormals = OutputMesh.GetVertexData<Vector3>(stream: 1);
-				var outputUVs = OutputMesh.GetVertexData<Vector2>(stream: 2);
+				var outputNormals = OutputMesh.GetVertexData<Vector3>(1);
+				var outputUVs = OutputMesh.GetVertexData<Vector2>(2);
 				var outputTris = OutputMesh.GetIndexData<int>();
 
 				Vector3 v0, v1, v2, v3;
@@ -281,7 +272,7 @@ namespace Universe.Data.Chunk {
 				outputVerts[vStart + 1] = v1;
 				outputVerts[vStart + 2] = v2;
 				outputVerts[vStart + 3] = v3;
-				var n = GetFaceNormal(dir);
+				float3 n = GetFaceNormal(dir);
 				outputNormals[vStart + 0] = new Vector3(n.x, n.y, n.z);
 				outputNormals[vStart + 1] = new Vector3(n.x, n.y, n.z);
 				outputNormals[vStart + 2] = new Vector3(n.x, n.y, n.z);
@@ -307,7 +298,7 @@ namespace Universe.Data.Chunk {
 					2 => new float3(0, 1, 0),
 					3 => new float3(0, -1, 0),
 					4 => new float3(0, 0, 1),
-					_ => new float3(0, 0, -1)
+					_ => new float3(0, 0, -1),
 				};
 			}
 
@@ -316,7 +307,7 @@ namespace Universe.Data.Chunk {
 					0 => new Vector2(0, 0),
 					1 => new Vector2(1, 0),
 					2 => new Vector2(1, 1),
-					_ => new Vector2(0, 1)
+					_ => new Vector2(0, 1),
 				};
 			}
 		}

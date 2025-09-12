@@ -1,6 +1,8 @@
+using System;
+
 namespace Networking.Entity {
 
-	[System.Serializable]
+	[Serializable]
 	public struct NetworkChunkData {
 		public int chunkX, chunkY, chunkZ;
 		public long seed; // -1 if modified

@@ -6,8 +6,8 @@
 // Input: 32x32x32 blocks, 4 bytes each (int)
 // Output: Compressed data (byte stream), metadata (compressed size)
 
-StructuredBuffer<int> ChunkInput; // [32*32*32] input blocks
-RWByteAddressBuffer ChunkCompressedOutput; // Output compressed data
+StructuredBuffer<int>    ChunkInput; // [32*32*32] input blocks
+RWByteAddressBuffer      ChunkCompressedOutput; // Output compressed data
 RWStructuredBuffer<uint> ChunkMetadata; // [0]=compressed size, [1]=original size, [2]=flags
 
 // Constants
@@ -20,57 +20,57 @@ RWStructuredBuffer<uint> ChunkMetadata; // [0]=compressed size, [1]=original siz
 [numthreads(32,32,1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x >= CHUNK_SIZE_X || id.y >= CHUNK_SIZE_Y) return;
+	if(id.x >= CHUNK_SIZE_X || id.y >= CHUNK_SIZE_Y) return;
 
-    // Calculate column offset
-    uint columnOffset = id.x + id.y * CHUNK_SIZE_X;
-    uint inputBase = columnOffset * CHUNK_SIZE_Z;
+	// Calculate column offset
+	uint columnOffset = id.x + id.y * CHUNK_SIZE_X;
+	uint inputBase = columnOffset * CHUNK_SIZE_Z;
 
-    // Temporary local buffer for compressed output (max 32 runs)
-    uint localCompressed[CHUNK_SIZE_Z * 2]; // (value, runLength) pairs
-    uint localBytes = 0;
+	// Temporary local buffer for compressed output (max 32 runs)
+	uint localCompressed[CHUNK_SIZE_Z * 2]; // (value, runLength) pairs
+	uint localBytes = 0;
 
-    int prev = ChunkInput[inputBase];
-    uint runLength = 1;
+	int  prev = ChunkInput[inputBase];
+	uint runLength = 1;
 
-    for (uint z = 1; z < CHUNK_SIZE_Z; ++z)
-    {
-        int curr = ChunkInput[inputBase + z];
-        if (curr == prev && runLength < 255)
-        {
-            runLength++;
-        }
-        else
-        {
-            // Store (value, runLength) pair
-            localCompressed[localBytes / 4] = prev;
-            localCompressed[localBytes / 4 + 1] = runLength;
-            localBytes += 8;
-            prev = curr;
-            runLength = 1;
-        }
-    }
-    // Store last run
-    localCompressed[localBytes / 4] = prev;
-    localCompressed[localBytes / 4 + 1] = runLength;
-    localBytes += 8;
+	for(uint z = 1; z < CHUNK_SIZE_Z; ++z)
+	{
+		int curr = ChunkInput[inputBase + z];
+		if(curr == prev && runLength < 255)
+		{
+			runLength++;
+		}
+		else
+		{
+			// Store (value, runLength) pair
+			localCompressed[localBytes / 4] = prev;
+			localCompressed[localBytes / 4 + 1] = runLength;
+			localBytes += 8;
+			prev = curr;
+			runLength = 1;
+		}
+	}
+	// Store last run
+	localCompressed[localBytes / 4] = prev;
+	localCompressed[localBytes / 4 + 1] = runLength;
+	localBytes += 8;
 
-    // Atomically reserve space in output buffer
-    uint outPtr;
-    InterlockedAdd(ChunkMetadata[0], localBytes, outPtr);
+	// Atomically reserve space in output buffer
+	uint outPtr;
+	InterlockedAdd(ChunkMetadata[0], localBytes, outPtr);
 
-    // Write compressed data to output buffer
-    for (uint i = 0; i < localBytes; i += 8)
-    {
-        ChunkCompressedOutput.Store(outPtr + i, localCompressed[i / 4]);
-        ChunkCompressedOutput.Store(outPtr + i + 4, localCompressed[i / 4 + 1]);
-    }
+	// Write compressed data to output buffer
+	for(uint i = 0; i < localBytes; i += 8)
+	{
+		ChunkCompressedOutput.Store(outPtr + i, localCompressed[i / 4]);
+		ChunkCompressedOutput.Store(outPtr + i + 4, localCompressed[i / 4 + 1]);
+	}
 
-    // Only one thread writes final metadata
-    if (id.x == 0 && id.y == 0)
-    {
-        ChunkMetadata[1] = BLOCKS_PER_CHUNK * 4; // original size in bytes
-        // Compressed size is in ChunkMetadata[0] after all threads finish
-        // Optionally set flags in ChunkMetadata[2]
-    }
+	// Only one thread writes final metadata
+	if(id.x == 0 && id.y == 0)
+	{
+		ChunkMetadata[1] = BLOCKS_PER_CHUNK * 4; // original size in bytes
+		// Compressed size is in ChunkMetadata[0] after all threads finish
+		// Optionally set flags in ChunkMetadata[2]
+	}
 }

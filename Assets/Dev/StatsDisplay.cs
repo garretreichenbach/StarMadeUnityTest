@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using TMPro;
+using System.Text;
 using Unity.VisualScripting;
 using UnityEngine;
 
@@ -22,30 +22,15 @@ namespace Dev {
 			All = FPS | Ping | PacketStats | RenderStats | EntityStats | MemoryStats,
 		}
 
-		//Todo: Add some way to visualize chunk borders better, like a grid overlay or colored edges
-		
-		public interface IStatsDisplayReporter {
-			string Report(DisplayMode displayMode, float deltaTime);
 
-			void ClearLastReport();
-		}
+		[InspectorLabel("Stats")]
+		public string stats = "";
 
-		
-		[InspectorLabel("Current Stats")]
-		public string Stats = "";
-
-		TextMeshProUGUI  _statsText;
 		public DisplayMode Mode = DisplayMode.FPS | DisplayMode.Ping;
 
 		public readonly List<IStatsDisplayReporter> Reporters = new List<IStatsDisplayReporter>();
-		
+
 		void Start() {
-			_statsText = GetComponent<Canvas>().GetComponentInChildren<TextMeshProUGUI>();
-			if(_statsText == null) {
-				Debug.LogError("StatsDisplay requires a Text component.");
-				enabled = false;
-				return;
-			}
 			if(Mode == DisplayMode.None) {
 				enabled = false;
 			}
@@ -53,18 +38,24 @@ namespace Dev {
 
 		void Update() {
 			if(Mode == DisplayMode.None) {
-				_statsText.text = "";
 				return;
 			}
 
-			var sb = new System.Text.StringBuilder();
+			StringBuilder sb = new StringBuilder();
 			for(int i = 0; i < Reporters.Count; i++) {
-				var reporter = Reporters[i];
+				IStatsDisplayReporter reporter = Reporters[i];
 				sb.AppendLine(reporter.Report(Mode, Time.deltaTime));
 			}
 
-			_statsText.text = sb.ToString().TrimEnd('\n');
-			Stats = _statsText.text;
+			stats = sb.ToString().TrimEnd('\n');
+		}
+
+		//Todo: Add some way to visualize chunk borders better, like a grid overlay or colored edges
+
+		public interface IStatsDisplayReporter {
+			string Report(DisplayMode displayMode, float deltaTime);
+
+			void ClearLastReport();
 		}
 	}
 }

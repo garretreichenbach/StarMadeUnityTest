@@ -31,7 +31,9 @@ namespace Universe.Data.Chunk {
 		public static readonly int DataMask = (1 << DataBits) - 1; // Mask
 		public static readonly int DataMaskInverted = ~DataMask; // Inverted mask for block-specific data
 
-		byte Version => 8; // Version of the chunk data structure
+		byte Version {
+			get => 8; // Version of the chunk data structure
+		}
 
 		public long _chunkID;
 		public long _seed;
@@ -54,19 +56,19 @@ namespace Universe.Data.Chunk {
 		}
 
 		public short GetBlockType(int index) {
-			return (short) (GetBlockData(index) & TypeMask);
+			return (short)(GetBlockData(index) & TypeMask);
 		}
 
 		public void SetBlockType(int index, short type) {
-			SetBlockData(index, (GetBlockData(index) & TypeMaskInverted) | (type & TypeMask));
+			SetBlockData(index, GetBlockData(index) & TypeMaskInverted | type & TypeMask);
 		}
 
 		public short GetBlockHP(int index) {
-			return (short)((GetBlockData(index) >> HPBitsStart) & HPMask);
+			return (short)(GetBlockData(index) >> HPBitsStart & HPMask);
 		}
 
 		public void SetBlockHP(int index, short hp) {
-			SetBlockData(index, (GetBlockData(index) & HPMaskInverted) | ((hp & HPMask) << HPBitsStart));
+			SetBlockData(index, GetBlockData(index) & HPMaskInverted | (hp & HPMask) << HPBitsStart);
 		}
 
 		public byte GetBlockOrientation(int index) {
@@ -74,18 +76,18 @@ namespace Universe.Data.Chunk {
 		}
 
 		public void SetBlockOrientation(int index, byte orientation) {
-			SetBlockData(index, (GetBlockData(index) & OrientationMaskInverted) | ((orientation & OrientationMask) << OrientationBitsStart));
+			SetBlockData(index, GetBlockData(index) & OrientationMaskInverted | (orientation & OrientationMask) << OrientationBitsStart);
 		}
 
 		public Vector3 GetBlockPosition(int index) {
-			var size = IChunkData.ChunkSize;
-			var x = index % size;
-			var y = (index / size) % size;
-			var z = index / (size * size);
+			int size = IChunkData.ChunkSize;
+			int x = index % size;
+			int y = index / size % size;
+			int z = index / (size * size);
 			return new Vector3(x, y, z);
 		}
 		public int GetBlockIndex(Vector3 position) {
-			var size = IChunkData.ChunkSize;
+			int size = IChunkData.ChunkSize;
 			int x = (int)position.x;
 			int y = (int)position.y;
 			int z = (int)position.z;
@@ -93,7 +95,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public bool GetBlockActivation(int index) {
-			if (IsActivatable()) {
+			if(IsActivatable()) {
 				//Todo: Extract activation from data bits using an external block info lookup
 			}
 			return false;

@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Dev;
 using Unity.VisualScripting;
 using UnityEngine;
@@ -9,70 +11,51 @@ namespace Settings {
 	public class EngineSettings : MonoBehaviour {
 		const string SettingsFilePath = "Assets/Config/settings.json";
 
-		public static EngineSettings Instance { get; private set; }
+		#region Performance Settings
 
-		[InspectorLabel("FPS Limit")] [Tooltip("Limit the game's frame rate to this value. Set to -1 for] unlimited.")]
-		public IntOptionsSettingsValue FPSLimit = new(
-			name: "FPS Limit",
-			description: "Limit the game's frame rate to this value. Set to -1 for unlimited.",
-			defaultValue: -1,
-			allowedValues: new[] { -1, 30, 60, 120, 240 },
-			false,
-			new ISettingsChangeListener[] {
-				new SettingsChangeListener<int>(value => {
-					Application.targetFrameRate = value;
-					Debug.Log($"FPS Limit set to {value}");
-				})
-			});
+		[InspectorLabel("Max Chunk Operation Wait Time")]
+		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max Chunk Operation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 5.0f, 30.0f);
 
-		[InspectorLabel("VSync Mode")]
-		[Tooltip("Set the VSync mode. 0 = Don't Sync, 1 = Every V Blank, 2 = Every Second V Blank.")]
-		public IntOptionsSettingsValue VSyncMode = new(
-			name: "VSync Mode",
-			description: "Set the VSync mode. 0 = Don't Sync, 1 = Every V Blank, 2 = Every Second V Blank.",
-			defaultValue: 1,
-			allowedValues: new[] { 0, 1, 2 },
-			false,
-			new ISettingsChangeListener[] {
-				new SettingsChangeListener<int>(value => {
-					QualitySettings.vSyncCount = value;
-					Debug.Log($"VSync Mode set to {value}");
-				})
-			}
-		);
+		#endregion
+
+		#region Dev Settings
+
 		[InspectorLabel("Stats Overlay Mode")]
 		[Tooltip("Set the stats overlay mode.")]
-		public EnumSettingsValue<StatsDisplay.DisplayMode> StatsOverlayMode = new(
-			name: "Stats Overlay Mode",
-			description: "Set the stats overlay mode.",
-			defaultValue: StatsDisplay.DisplayMode.FPS | StatsDisplay.DisplayMode.Ping,
-			debugOnly: false,
-			listeners: new ISettingsChangeListener[] {
+		public EnumSettingsValue<StatsDisplay.DisplayMode> StatsOverlayMode = new EnumSettingsValue<StatsDisplay.DisplayMode>("Stats Overlay Mode",
+			"Set the stats overlay mode.",
+			StatsDisplay.DisplayMode.FPS | StatsDisplay.DisplayMode.Ping,
+			false,
+			new ISettingsChangeListener[] {
 				new SettingsChangeListener<StatsDisplay.DisplayMode>(value => {
-					var statsDisplay = FindObjectOfType<StatsDisplay>();
+					StatsDisplay statsDisplay = FindObjectOfType<StatsDisplay>();
 					if(statsDisplay != null) {
 						statsDisplay.enabled = value != StatsDisplay.DisplayMode.None;
 						Debug.Log($"Stats Overlay Mode set to {value}");
 					}
-				})
-			}
-		);
+				}),
+			});
+
+		#endregion
+
+		public static EngineSettings Instance { get; private set; }
 
 		void Start() {
 			Instance = this;
 			LoadSettings();
 		}
-		
+
 		/**
 		 * Loads the settings from the config file.
 		 */
 		public void LoadSettings() {
-			if(System.IO.File.Exists(SettingsFilePath)) {
+			if(File.Exists(SettingsFilePath)) {
 				try {
-					string json = System.IO.File.ReadAllText(SettingsFilePath);
+					string json = File.ReadAllText(SettingsFilePath);
 					JsonUtility.FromJsonOverwrite(json, this);
 					Debug.Log("Settings loaded from " + SettingsFilePath);
-				} catch(System.Exception e) {
+				} catch(Exception e) {
 					Debug.LogWarning("Failed to load settings from " + SettingsFilePath + ": " + e.Message);
 					SetDefaults();
 				}
@@ -91,7 +74,7 @@ namespace Settings {
 		 */
 		public void SaveSettings() {
 			string json = JsonUtility.ToJson(this, true);
-			System.IO.File.WriteAllText(SettingsFilePath, json);
+			File.WriteAllText(SettingsFilePath, json);
 			Debug.Log("Settings saved to " + SettingsFilePath);
 		}
 
@@ -104,5 +87,37 @@ namespace Settings {
 
 			SaveSettings();
 		}
+
+		#region Graphics Settings
+
+		[InspectorLabel("FPS Limit")] [Tooltip("Limit the game's frame rate to this value. Set to -1 for] unlimited.")]
+		public IntOptionsSettingsValue FPSLimit = new IntOptionsSettingsValue("FPS Limit",
+			"Limit the game's frame rate to this value. Set to -1 for unlimited.",
+			-1,
+			new[] { -1, 30, 60, 120, 240 },
+			false,
+			new ISettingsChangeListener[] {
+				new SettingsChangeListener<int>(value => {
+					Application.targetFrameRate = value;
+					Debug.Log($"FPS Limit set to {value}");
+				}),
+			});
+
+		[InspectorLabel("VSync Mode")]
+		[Tooltip("Set the VSync mode. 0 = Don't Sync, 1 = Every V Blank, 2 = Every Second V Blank.")]
+		public IntOptionsSettingsValue VSyncMode = new IntOptionsSettingsValue("VSync Mode",
+			"Set the VSync mode. 0 = Don't Sync, 1 = Every V Blank, 2 = Every Second V Blank.",
+			1,
+			new[] { 0, 1, 2 },
+			false,
+			new ISettingsChangeListener[] {
+				new SettingsChangeListener<int>(value => {
+					QualitySettings.vSyncCount = value;
+					Debug.Log($"VSync Mode set to {value}");
+				}),
+			});
+
+		#endregion
+
 	}
 }

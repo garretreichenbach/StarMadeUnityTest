@@ -1,29 +1,40 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 
 namespace Settings {
 	public interface ISettingsValue<T> {
 		public string Name { get; }
+
 		public string Description { get; }
+
 		public T Value { get; }
+
 		public T DefaultValue { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 	}
 
 	public struct IntSettingsValue : ISettingsValue<int> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public int Value { get; private set; }
+
 		public int DefaultValue { get; }
+
 		public int Min { get; }
+
 		public int Max { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public IntSettingsValue(string name, string description, int defaultValue, int min, int max,
-			bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
+		public IntSettingsValue(string name, string description, int defaultValue, int min, int max, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -39,13 +50,12 @@ namespace Settings {
 
 		public void SetValue(int newValue) {
 			if(newValue < Min || newValue > Max) {
-				Debug.LogWarning(
-					$"Attempted to set {Name} to {newValue}, which is outside the range of {Min} to {Max}.");
+				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is outside the range of {Min} to {Max}.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -53,16 +63,20 @@ namespace Settings {
 
 	public struct IntOptionsSettingsValue : ISettingsValue<int> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public int Value { get; private set; }
+
 		public int DefaultValue { get; }
+
 		public int[] AllowedValues { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public IntOptionsSettingsValue(string name, string description, int defaultValue, int[] allowedValues,
-			bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
+		public IntOptionsSettingsValue(string name, string description, int defaultValue, int[] allowedValues, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -76,13 +90,13 @@ namespace Settings {
 		}
 
 		public void SetValue(int newValue) {
-			if(System.Array.IndexOf(AllowedValues, newValue) < 0) {
+			if(Array.IndexOf(AllowedValues, newValue) < 0) {
 				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is not in the list of allowed values.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -90,17 +104,22 @@ namespace Settings {
 
 	public struct FloatSettingsValue : ISettingsValue<float> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public float Value { get; private set; }
+
 		public float DefaultValue { get; }
+
 		public float Min { get; }
+
 		public float Max { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public FloatSettingsValue(string name, string description, float defaultValue, float min, float max,
-			bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
+		public FloatSettingsValue(string name, string description, float defaultValue, float min, float max, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -116,13 +135,12 @@ namespace Settings {
 
 		public void SetValue(float newValue) {
 			if(newValue < Min || newValue > Max) {
-				Debug.LogWarning(
-					$"Attempted to set {Name} to {newValue}, which is outside the range of {Min} to {Max}.");
+				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is outside the range of {Min} to {Max}.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -130,16 +148,20 @@ namespace Settings {
 
 	public struct FloatOptionsSettingsValue : ISettingsValue<float> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public float Value { get; private set; }
+
 		public float DefaultValue { get; }
+
 		public float[] AllowedValues { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public FloatOptionsSettingsValue(string name, string description, float defaultValue, float[] allowedValues,
-			bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
+		public FloatOptionsSettingsValue(string name, string description, float defaultValue, float[] allowedValues, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -153,13 +175,13 @@ namespace Settings {
 		}
 
 		public void SetValue(float newValue) {
-			if(System.Array.IndexOf(AllowedValues, newValue) < 0) {
+			if(Array.IndexOf(AllowedValues, newValue) < 0) {
 				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is not in the list of allowed values.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -167,15 +189,18 @@ namespace Settings {
 
 	public struct BoolSettingsValue : ISettingsValue<bool> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public bool Value { get; private set; }
+
 		public bool DefaultValue { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public BoolSettingsValue(string name, string description, bool defaultValue, bool debugOnly = false,
-			ISettingsChangeListener[] listeners = null) {
+		public BoolSettingsValue(string name, string description, bool defaultValue, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -189,7 +214,7 @@ namespace Settings {
 
 		public void SetValue(bool newValue) {
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -197,11 +222,15 @@ namespace Settings {
 
 	public struct StringSettingsValue : ISettingsValue<string> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public string Value { get; private set; }
+
 		public string DefaultValue { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
 		public StringSettingsValue(string name, string description, string defaultValue, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
@@ -218,7 +247,7 @@ namespace Settings {
 
 		public void SetValue(string newValue) {
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -226,16 +255,20 @@ namespace Settings {
 
 	public struct StringOptionsSettingsValue : ISettingsValue<string> {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public string Value { get; private set; }
+
 		public string DefaultValue { get; }
+
 		public string[] AllowedValues { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
-		public StringOptionsSettingsValue(string name, string description, string defaultValue, string[] allowedValues,
-			bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
+		public StringOptionsSettingsValue(string name, string description, string defaultValue, string[] allowedValues, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
 			Name = name;
 			Description = description;
 			DefaultValue = defaultValue;
@@ -249,25 +282,29 @@ namespace Settings {
 		}
 
 		public void SetValue(string newValue) {
-			if(System.Array.IndexOf(AllowedValues, newValue) < 0) {
+			if(Array.IndexOf(AllowedValues, newValue) < 0) {
 				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is not in the list of allowed values.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
 	}
 
-	public struct EnumSettingsValue<T> : ISettingsValue<T> where T : System.Enum {
+	public struct EnumSettingsValue<T> : ISettingsValue<T> where T : Enum {
 		public string Name { get; }
+
 		public string Description { get; }
 
 		public T Value { get; private set; }
+
 		public T DefaultValue { get; }
+
 		public bool DebugOnly { get; }
+
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 
 		public EnumSettingsValue(string name, string description, T defaultValue, bool debugOnly = false, ISettingsChangeListener[] listeners = null) {
@@ -283,14 +320,13 @@ namespace Settings {
 		}
 
 		public void SetValue(T newValue) {
-			if(!System.Enum.IsDefined(typeof(T), newValue)) {
-				Debug.LogWarning(
-					$"Attempted to set {Name} to {newValue}, which is not a valid value for enum {typeof(T).Name}.");
+			if(!Enum.IsDefined(typeof(T), newValue)) {
+				Debug.LogWarning($"Attempted to set {Name} to {newValue}, which is not a valid value for enum {typeof(T).Name}.");
 				return;
 			}
 
 			Value = newValue;
-			foreach(var listener in ChangeListeners) {
+			foreach(ISettingsChangeListener listener in ChangeListeners) {
 				listener.OnSettingChanged(Name, newValue);
 			}
 		}
@@ -299,11 +335,11 @@ namespace Settings {
 	public interface ISettingsChangeListener {
 		void OnSettingChanged(string settingName, object newValue);
 	}
-	
-	public class SettingsChangeListener<T> : ISettingsChangeListener {
-		private readonly System.Action<T> _onChange;
 
-		public SettingsChangeListener(System.Action<T> onChange) {
+	public class SettingsChangeListener<T> : ISettingsChangeListener {
+		readonly Action<T> _onChange;
+
+		public SettingsChangeListener(Action<T> onChange) {
 			_onChange = onChange;
 		}
 

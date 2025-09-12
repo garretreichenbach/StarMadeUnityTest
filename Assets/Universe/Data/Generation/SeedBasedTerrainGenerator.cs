@@ -35,11 +35,7 @@ namespace Universe.Data.Generation {
 		/// <summary>
 		///     Generate chunk data from seed for asteroid-type terrain
 		/// </summary>
-		public static void GenerateAsteroidChunk(
-			IChunkData chunkData,
-			int chunkX, int chunkY, int chunkZ,
-			long chunkSeed,
-			AsteroidGenerationSettings settings) {
+		public static void GenerateAsteroidChunk(IChunkData chunkData, int chunkX, int chunkY, int chunkZ, long chunkSeed, AsteroidGenerationSettings settings) {
 
 			// Initialize random with chunk seed
 			Random random = new Random((int)(chunkSeed & 0x7FFFFFFF));
@@ -63,13 +59,11 @@ namespace Universe.Data.Generation {
 						int blockIndex = chunkData.GetBlockIndex(new Vector3(x, y, z));
 
 						// Generate block type using asteroid generation logic
-						short blockType = GenerateAsteroidBlock(
-							worldX,
+						short blockType = GenerateAsteroidBlock(worldX,
 							worldY,
 							worldZ,
 							chunkSeed, // Use chunk seed for consistency
-							settings
-						);
+							settings);
 
 						chunkData.SetBlockType(blockIndex, blockType);
 					}
@@ -80,37 +74,21 @@ namespace Universe.Data.Generation {
 		/// <summary>
 		///     Generate a single block for asteroid terrain using the same logic as TerrainTest
 		/// </summary>
-		static short GenerateAsteroidBlock(
-			int worldX, int worldY, int worldZ,
-			long seed,
-			AsteroidGenerationSettings settings) {
+		static short GenerateAsteroidBlock(int worldX, int worldY, int worldZ, long seed, AsteroidGenerationSettings settings) {
 
 			// Calculate distance from asteroid center
-			float distanceFromCenter = Mathf.Sqrt(
-				Mathf.Pow(worldX - settings.centerX, 2) +
-				Mathf.Pow(worldY - settings.centerY, 2) +
-				Mathf.Pow(worldZ - settings.centerZ, 2)
-			);
+			float distanceFromCenter = Mathf.Sqrt(Mathf.Pow(worldX - settings.centerX, 2) + Mathf.Pow(worldY - settings.centerY, 2) + Mathf.Pow(worldZ - settings.centerZ, 2));
 
 			// Add noise-based distortion to create irregular asteroid shape
-			double distortion = Perlin.Noise(
-				                    worldX * settings.noiseFrequency,
-				                    worldY * settings.noiseFrequency,
-				                    worldZ * settings.noiseFrequency
-			                    ) *
-			                    settings.shapeDistortion;
+			double distortion = Perlin.Noise(worldX * settings.noiseFrequency, worldY * settings.noiseFrequency, worldZ * settings.noiseFrequency) * settings.shapeDistortion;
 
 			float distortedRadius = settings.radius + (float)distortion;
 
 			// Determine if this block should be solid
-			if (distanceFromCenter <= distortedRadius) {
+			if(distanceFromCenter <= distortedRadius) {
 				// Near surface - add some variation
-				if (distanceFromCenter > distortedRadius - settings.surfaceThickness) {
-					double surfaceNoise = Perlin.Noise(
-						worldX * settings.noiseFrequency * 2,
-						worldY * settings.noiseFrequency * 2,
-						worldZ * settings.noiseFrequency * 2
-					);
+				if(distanceFromCenter > distortedRadius - settings.surfaceThickness) {
+					double surfaceNoise = Perlin.Noise(worldX * settings.noiseFrequency * 2, worldY * settings.noiseFrequency * 2, worldZ * settings.noiseFrequency * 2);
 
 					return distanceFromCenter <= distortedRadius - surfaceNoise * 5 ? (short)1 : (short)0;
 				}
@@ -124,15 +102,11 @@ namespace Universe.Data.Generation {
 		/// <summary>
 		///     Generate chunk data for any terrain type based on settings
 		/// </summary>
-		public static void GenerateChunk(
-			IChunkData chunkData,
-			int chunkX, int chunkY, int chunkZ,
-			long worldSeed,
-			ITerrainGenerationSettings settings) {
+		public static void GenerateChunk(IChunkData chunkData, int chunkX, int chunkY, int chunkZ, long worldSeed, ITerrainGenerationSettings settings) {
 
 			long chunkSeed = GetChunkSeed(chunkX, chunkY, chunkZ, worldSeed);
 
-			switch (settings.TerrainType) {
+			switch(settings.TerrainType) {
 				case TerrainType.Asteroid:
 					GenerateAsteroidChunk(chunkData, chunkX, chunkY, chunkZ, chunkSeed, (AsteroidGenerationSettings)settings);
 					break;
@@ -158,11 +132,7 @@ namespace Universe.Data.Generation {
 			}
 		}
 
-		static void GeneratePlanetChunk(
-			IChunkData chunkData,
-			int chunkX, int chunkY, int chunkZ,
-			long chunkSeed,
-			PlanetGenerationSettings settings) {
+		static void GeneratePlanetChunk(IChunkData chunkData, int chunkX, int chunkY, int chunkZ, long chunkSeed, PlanetGenerationSettings settings) {
 
 			// TODO: Implement planet terrain generation
 			// For now, generate empty chunks

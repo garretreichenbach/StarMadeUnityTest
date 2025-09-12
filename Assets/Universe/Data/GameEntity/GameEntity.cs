@@ -1,136 +1,115 @@
 using System;
 using UnityEngine;
-using UnityEngine.Serialization;
 using Universe.Data.Chunk;
 
 namespace Universe.Data.GameEntity {
-    
-    public abstract class GameEntity : MonoBehaviour {
 
-        static int _idCounter = 0;
+	public abstract class GameEntity : MonoBehaviour {
 
-        public struct GameEntityData {
-            public GameEntityType Type;
-            public int ID;
-            public string Name;
-            public int FactionID;
-            public int SectorID;
+		static int _idCounter;
 
-            public GameEntityData(GameEntityType type, string name = "", int factionID = 0, int sectorID = 0) : this() {
-                Type = type;
-                ID = _idCounter++;
-                Name = name;
-                FactionID = factionID;
-                SectorID = sectorID;
-            }
-        }
+		[Header("Entity Info")]
+		public int ID => _data.ID;
+		public long DatabaseID => _data.DatabaseID;
+		public GameEntityType Type => _data.Type;
+		public string Name => _data.Name;
+		public int FactionID => _data.FactionID;
+		public int SectorID => _data.SectorID;
+		public bool Loaded => _data.Loaded;
 
-        public readonly GameEntityType Type;
-        public int id;
-        public bool loaded;
-        protected int sectorID;
-        int _totalChunks;
-        public ChunkData[] Chunks = Array.Empty<ChunkData>();
+		[Header("Debug Stats")]
+		public int blockCount;
+		public int chunkCount;
+		public int triangleCount;
+		public int vertexCount;
 
-        [Header("Stats")]
-        public int blockCount;
-        public int chunkCount;
-        public int triangleCount;
-        public int vertexCount;
+		public Vector3Int chunkDimensions;
+		int _totalChunks;
+		public bool isDirty;
 
-        public GameEntity(int sectorID) {
-            id = _idCounter++;
-            this.sectorID = sectorID;
-        }
+		GameEntityData _data;
 
-        public IChunkData GetChunkData(long index) {
-            return Chunks[index];
-        }
+		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
-        public Vector3Int chunkDimensions;
+		public GameEntity(GameEntityData data) {
+			_data = data;
+		}
 
-        public Vector3 GetChunkPosition(int index) {
-            var chunkX = index % chunkDimensions.x;
-            var chunkY = (index / chunkDimensions.x) % chunkDimensions.y;
-            var chunkZ = index / (chunkDimensions.x * chunkDimensions.y);
-            return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
-        }
+		public IChunkData GetChunkData(long index) {
+			return Chunks[index];
+		}
 
-        protected GameEntity(GameEntityType type) {
-            Type = type;
-        }
-        
-        protected abstract void Initialize(GameEntityData data);
+		public Vector3 GetChunkPosition(int index) {
+			int chunkX = index % chunkDimensions.x;
+			int chunkY = index / chunkDimensions.x % chunkDimensions.y;
+			int chunkZ = index / (chunkDimensions.x * chunkDimensions.y);
+			return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
+		}
 
-        /**
-         * Loads the entity data from the database, and creates an empty game object in the scene.
-         * Note: This does not load the entity's block data, just the entity data itself.
-         */
-        public GameEntity LoadDataFromDB(GameEntityData data) {
-            //Todo: Implement loading from DB
-            //For now, just create a new entity entirely for testing
-            Asteroid asteroid = gameObject.AddComponent<Asteroid>();
-            asteroid.Initialize(data);
-            return asteroid;
-        }
-        
-        public void LoadInSector(int sectorID) {
-            try {
-                this.sectorID = sectorID;
-                //Todo: Load chunk IDs from DB based on entity ID and sector ID
-            } catch(Exception e) {
-                Debug.LogError("Failed to load entity in sector: " + e.Message);
-                loaded = false;
-            }
-        }
+		public void RebuildMesh() {
+			var combine = new CombineInstance[chunkCount];
+			blockCount = 0;
+			triangleCount = 0;
+			vertexCount = 0;
 
-        public bool isDirty = false;
+			for(int i = 0; i < chunkCount; i++) {
+				Vector3 chunkPos = GetChunkPosition(i);
+				ChunkBuildResult result = ChunkBuilder.BuildChunk(GetChunkData(i), chunkPos);
+				combine[i].mesh = result.mesh;
+				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
+				blockCount += result.blockCount;
+				triangleCount += result.triangleCount;
+				vertexCount += result.vertexCount;
+			}
 
-        public void RebuildMesh() {
-            var combine = new CombineInstance[chunkCount];
-            blockCount = 0;
-            triangleCount = 0;
-            vertexCount = 0;
+			MeshFilter meshFilter = GetComponent<MeshFilter>();
+			if(meshFilter == null) {
+				meshFilter = gameObject.AddComponent<MeshFilter>();
+			}
 
-            for (var i = 0; i < chunkCount; i++) {
-                var chunkPos = GetChunkPosition(i);
-                var result = ChunkBuilder.BuildChunk(GetChunkData(i), chunkPos);
-                combine[i].mesh = result.mesh;
-                combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
-                blockCount += result.blockCount;
-                triangleCount += result.triangleCount;
-                vertexCount += result.vertexCount;
-            }
+			MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+			if(meshRenderer == null) {
+				meshRenderer = gameObject.AddComponent<MeshRenderer>();
+				meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
+			}
 
-            var meshFilter = GetComponent<MeshFilter>();
-            if (meshFilter == null) {
-                meshFilter = gameObject.AddComponent<MeshFilter>();
-            }
+			Mesh mesh = new Mesh();
+			mesh.CombineMeshes(combine, true);
+			meshFilter.mesh = mesh;
+			isDirty = false;
+		}
 
-            var meshRenderer = GetComponent<MeshRenderer>();
-            if (meshRenderer == null) {
-                meshRenderer = gameObject.AddComponent<MeshRenderer>();
-                meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
-            }
+		public void AllocateChunks(int chunksTotal) {
+			Chunks = new ChunkData[chunksTotal];
+			chunkCount = chunksTotal;
+		}
 
-            var mesh = new Mesh();
-            mesh.CombineMeshes(combine, true);
-            meshFilter.mesh = mesh;
-            isDirty = false;
-        }
+		public struct GameEntityData {
+			public GameEntityType Type;
+			public int ID;
+			public long DatabaseID;
+			public string Name;
+			public int FactionID;
+			public int SectorID;
+			public bool Loaded;
 
-        public void AllocateChunks(int chunksTotal) {
-            Chunks = new ChunkData[chunksTotal];
-            chunkCount = chunksTotal;
-        }
-    }
-    
-    public enum GameEntityType {
-        Ship,
-        Station,
-        Asteroid,
-        Planet,
-        Player,
-        Character,
-    }
+			public GameEntityData(GameEntityType type, long databaseID, string name = "", int factionID = 0, int sectorID = 0) : this() {
+				Type = type;
+				ID = _idCounter++;
+				DatabaseID = databaseID;
+				Name = name;
+				FactionID = factionID;
+				SectorID = sectorID;
+			}
+		}
+	}
+
+	public enum GameEntityType {
+		Ship,
+		Station,
+		Asteroid,
+		Planet,
+		Player,
+		Character,
+	}
 }

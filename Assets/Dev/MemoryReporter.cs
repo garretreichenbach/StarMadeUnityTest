@@ -1,9 +1,10 @@
+using System;
 using UnityEngine;
 
 namespace Dev {
 	public class MemoryReporter : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 		void Start() {
-			var statsDisplay = FindObjectOfType<StatsDisplay>();
+			StatsDisplay statsDisplay = FindObjectOfType<StatsDisplay>();
 			if(statsDisplay != null) {
 				statsDisplay.Reporters.Add(this);
 			} else {
@@ -12,7 +13,7 @@ namespace Dev {
 		}
 
 		public string Report(StatsDisplay.DisplayMode displayMode, float deltaTime) {
-			long memory = System.GC.GetTotalMemory(false) / (1024 * 1024);
+			long memory = GC.GetTotalMemory(false) / (1024 * 1024);
 			return displayMode.HasFlag(StatsDisplay.DisplayMode.MemoryStats) ? $"Memory: {memory} MB" : "";
 		}
 
