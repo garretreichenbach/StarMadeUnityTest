@@ -6,6 +6,8 @@
 // Output: Uncompressed chunk data (32x32x32 ints)
 // Metadata: [0]=compressed size, [1]=original size
 
+#pragma kernel CSMain
+
 ByteAddressBuffer       CompressedInput; // Compressed data (offset table + data)
 RWStructuredBuffer<int> ChunkOutput; // Uncompressed output (32*32*32 ints)
 StructuredBuffer<uint>  ChunkMetadata; // [0]=compressed size, [1]=original size

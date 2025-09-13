@@ -1,10 +1,27 @@
 using System;
 using System.Threading.Tasks;
+using UnityEditor;
 using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.World.Database;
 
 namespace Universe.Data.GameEntity {
+
+	[CustomEditor(typeof(GameEntity), true)]
+	public class EntityEditor : Editor {
+		public override void OnInspectorGUI() {
+			DrawDefaultInspector();
+			if(GUILayout.Button("Rebuild Mesh")) {
+				(target as GameEntity)?.RebuildMesh();
+			}
+			if(GUILayout.Button("Load Chunk Data") && !((GameEntity) target).ChunkLoaded) {
+				EntityDatabaseManager.Instance.LoadEntity(((GameEntity) target).ID);
+			}
+			if(GUILayout.Button("Unload Chunk Data") && ((GameEntity) target).ChunkLoaded) {
+				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity) target).ID);
+			}
+		}
+	}
 
 	public abstract class GameEntity : MonoBehaviour {
 
@@ -15,10 +32,25 @@ namespace Universe.Data.GameEntity {
 		public int ID => Data.ID;
 		public long DatabaseID => Data.DatabaseID;
 		public GameEntityType Type => Data.Type;
-		public string Name => Data.Name;
-		public int FactionID => Data.FactionID;
-		public int SectorID => Data.SectorID;
-		public bool ChunkLoaded => Data.ChunkLoaded;
+		public string Name {
+			get => Data.Name;
+			set => Data.Name = value;
+		}
+
+		public int FactionID {
+			get => Data.FactionID;
+			set => Data.FactionID = value;
+		}
+
+		public int SectorID {
+			get => Data.SectorID;
+			set => Data.SectorID = value;
+		}
+
+		public bool ChunkLoaded {
+			get => Data.ChunkLoaded;
+			set => Data.ChunkLoaded = value;
+		}
 
 		string ChunkDataPath => EntityDatabaseManager.Instance.GetChunkDataPath(DatabaseID);
 
@@ -29,13 +61,12 @@ namespace Universe.Data.GameEntity {
 		public int vertexCount;
 
 		public Vector3Int chunkDimensions;
-		int _totalChunks;
-		public bool isDirty;
 		public GameEntityData Data;
 		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
-		public GameEntity(GameEntityData data) {
+		protected GameEntity(GameEntityData data) {
 			Data = data;
+			EntityDatabaseManager.Instance.CreateEntityData(data);
 		}
 
 		public async Task<bool> WriteChunkData() {
@@ -44,14 +75,9 @@ namespace Universe.Data.GameEntity {
 				return false;
 			}
 			//Compress chunk data
-			byte[] compressedData = ChunkMemoryManager.Instance.CompressEntity(this);
+			byte[] compressedData = await ChunkMemoryManager.Instance.CompressEntity(this);
 			//Write to disk
-			bool success = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
-			if(!success) {
-				Debug.LogError($"Failed to write chunk data for entity {Name} to path {ChunkDataPath}");
-				return false;
-			}
-			isDirty = false;
+			_ = EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
 			return true;
 		}
 
@@ -74,7 +100,7 @@ namespace Universe.Data.GameEntity {
 
 			for(int i = 0; i < chunkCount; i++) {
 				Vector3 chunkPos = GetChunkPosition(i);
-				ChunkBuildResult result = ChunkBuilder.BuildChunk(GetChunkData(i), chunkPos);
+				ChunkBuildResult result = ChunkBuilder.BuildChunk(GetChunkData(i));
 				combine[i].mesh = result.mesh;
 				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
 				blockCount += result.blockCount;
@@ -96,12 +122,12 @@ namespace Universe.Data.GameEntity {
 			Mesh mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
 			meshFilter.mesh = mesh;
-			isDirty = false;
 		}
 
 		public void AllocateChunks(int chunksTotal) {
 			Chunks = new ChunkData[chunksTotal];
 			chunkCount = chunksTotal;
+			ChunkLoaded = true;
 		}
 
 		public struct GameEntityData {

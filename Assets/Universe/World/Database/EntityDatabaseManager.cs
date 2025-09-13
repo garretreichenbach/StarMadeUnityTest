@@ -15,21 +15,41 @@ namespace Universe.World.Database {
 		[Header("Database Stats")]
 		[InspectorLabel("Current Total Entities")]
 		[Tooltip("The total number of entities active in the scene.")]
-		public int CurrentActiveEntityCount { get; private set; }
+		public int CurrentActiveEntityCount => _activeEntities.Count;
 
 		[InspectorLabel("Current Loaded Entities")]
 		[Tooltip("The number of entities currently chunk loaded in memory.")]
-		public int CurrentLoadedEntityCount { get; private set; }
+		public int CurrentLoadedEntityCount {
+			get {
+				int count = 0;
+				foreach(var entity in _activeEntities.Values) {
+					if(entity.ChunkLoaded) {
+						count++;
+					}
+				}
+				return count;
+			}
+		}
 
 		[InspectorLabel("Current Unloaded Entities")]
 		[Tooltip("The number of entities that are active in the scene, but not chunk loaded].")]
-		public int CurrentUnloadedEntityCount { get; private set; }
+		public int CurrentUnloadedEntityCount {
+			get {
+				int count = 0;
+				foreach(var entity in _activeEntities.Values) {
+					if(!entity.ChunkLoaded) {
+						count++;
+					}
+				}
+				return count;
+			}
+		}
 
 		//Todo: More stats like amount of entities currently being processed for saving/loading, etc.
 
 		public static EntityDatabaseManager Instance { get; private set; }
 
-		Dictionary<int, GameEntity.GameEntityData> ActiveEntities = new Dictionary<int, GameEntity.GameEntityData>();
+		static Dictionary<int, GameEntity.GameEntityData> _activeEntities;
 
 		const string UniverseName = "world0"; //Todo: Make this based on the current universe being played
 
@@ -40,6 +60,7 @@ namespace Universe.World.Database {
 				Destroy(this);
 			} else {
 				Instance = this;
+				_activeEntities = new Dictionary<int, GameEntity.GameEntityData>();
 				InitDB();
 			}
 		}
@@ -62,7 +83,7 @@ namespace Universe.World.Database {
 		* Loads the entity data from the database, and creates an empty game object in the scene.
 		* Note: This does not load the entity's block data, just the entity data itself
 		*/
-		public Task<GameEntity.GameEntityData> LoadEntityAsync(long databaseID) {
+		public Task<GameEntity.GameEntityData> LoadEntity(long databaseID) {
 			var col = _db.GetCollection<GameEntity.GameEntityData>("entities");
 			GameEntity.GameEntityData data = col.FindById(databaseID);
 			GameObject entityObj = new GameObject($"Entity_{data.ID}");
@@ -72,25 +93,28 @@ namespace Universe.World.Database {
 					entityComp = entityObj.AddComponent<Asteroid>();
 					break;
 			}
-			ActiveEntities.Add(data.ID, data);
+			_activeEntities.Add(data.ID, data);
 			entityComp.Data = data;
 			return Task.FromResult(data);
 		}
 
-		public Task UnloadEntityAsync(int entityID) {
-			if(ActiveEntities.ContainsKey(entityID)) {
-				GameEntity.GameEntityData data = ActiveEntities[entityID];
+		/**
+		 * Unloads the entity from the scene and database.
+		 */
+		public Task UnloadEntity(int entityID) {
+			if(_activeEntities.ContainsKey(entityID)) {
+				GameEntity.GameEntityData data = _activeEntities[entityID];
 				if(data.ChunkLoaded) {
 					GameEntity entityComp = GetLoadedEntityFromID(entityID);
 					if(entityComp != null) {
-						entityComp.WriteChunkData();
+						_ = entityComp.WriteChunkData();
 						data.ChunkLoaded = false;
 						Destroy(entityComp.gameObject);
 					} else {
 						Debug.LogWarning($"Entity ID {entityID} is marked as loaded but could not find the component in the scene.");
 					}
 				}
-				ActiveEntities.Remove(entityID);
+				_activeEntities.Remove(entityID);
 			} else {
 				Debug.LogWarning($"Entity ID {entityID} not found in active entities.");
 			}
@@ -98,8 +122,7 @@ namespace Universe.World.Database {
 		}
 
 		public GameEntity GetLoadedEntityFromID(int entityID) {
-			if(ActiveEntities.ContainsKey(entityID)) {
-				//Get scene
+			if(_activeEntities.ContainsKey(entityID)) {
 				var entityObj = GameObject.Find($"Entity_{entityID}");
 				if(entityObj != null) {
 					var entityComp = entityObj.GetComponent<GameEntity>();
@@ -145,6 +168,14 @@ namespace Universe.World.Database {
 				Debug.LogError($"Failed to write chunk data to {chunkDataPath}: {ex}");
 				return false;
 			}
+		}
+
+		/**
+		 * Adds a new entity to the database if it doesn't already exist.'
+		 */
+		public void CreateEntityData(GameEntity.GameEntityData data) {
+			var col = _db.GetCollection<GameEntity.GameEntityData>("entities");
+			col.Insert(data);
 		}
 	}
 }

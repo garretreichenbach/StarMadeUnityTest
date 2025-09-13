@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Dev {
 	public class MemoryReporter : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 		void Start() {
-			StatsDisplay statsDisplay = FindObjectOfType<StatsDisplay>();
+			StatsDisplay statsDisplay = FindFirstObjectByType<StatsDisplay>();
 			if(statsDisplay != null) {
 				statsDisplay.Reporters.Add(this);
 			} else {

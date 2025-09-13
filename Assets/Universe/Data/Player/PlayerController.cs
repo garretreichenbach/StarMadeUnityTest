@@ -1,6 +1,6 @@
+using Settings;
 using UnityEngine;
 using Universe.World;
-using Universe.World.Sector;
 
 namespace Universe.Data.Player {
 	/**
@@ -38,7 +38,7 @@ namespace Universe.Data.Player {
 		}
 
 		void CheckSectorTransition() {
-			int sectorSize = Sector.SectorSize;
+			int sectorSize = ServerSettings.Instance.SectorSize.Value;
 			Vector3 playerPosition = transform.position;
 			int newSectorX = Mathf.FloorToInt(playerPosition.x / sectorSize);
 			int newSectorY = Mathf.FloorToInt(playerPosition.y / sectorSize);

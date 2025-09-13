@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.VisualScripting;
 using UnityEngine;
 
 namespace Universe.World {
@@ -22,12 +23,11 @@ namespace Universe.World {
 
 		public void LoadSector(int sectorID, bool loadSurrounding) {
 			// Todo: Implement sector loading logic from db, for now just create new sector
-			Debug.Log("Loading sector: " + sectorID + " with surrounding: " + loadSurrounding);
-			GameObject sectorObject = new GameObject("Sector_" + sectorID);
-			sectorObject.transform.parent = transform;
-			sectorObject.transform.position = new Vector3(sectorID % 16 * Sector.Sector.SectorSize, sectorID / 16 % 16 * Sector.Sector.SectorSize, sectorID / 256 * Sector.Sector.SectorSize);
-			sectorObject.AddComponent<Sector.Sector>();
-			LoadedSectors.Add(sectorID);
+			// Debug.Log("Loading sector: " + sectorID + " with surrounding: " + loadSurrounding);
+			// GameObject sectorObject = new GameObject("Sector_" + sectorID);
+			// Sector sector = gameObject.AddComponent<Sector>();
+			// sector.transform.parent = transform;
+			// sector.transform.position = new Vector3(sectorID % 16 * Sector.Sector.SectorSize, sectorID / 16 % 16 * Sector.Sector.SectorSize, sectorID / 256 * Sector.Sector.SectorSize); LoadedSectors.Add(sectorID);
 			// If loadSurrounding is true, load adjacent sectors as well (not implemented yet)
 		}
 	}

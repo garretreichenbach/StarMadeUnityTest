@@ -6,16 +6,20 @@ using UnityEngine;
 
 namespace Settings {
 	/**
-	 * Serializable settings for the game engine.
-	 */
+	* Serializable settings for the game engine.
+	*/
 	public class EngineSettings : MonoBehaviour {
-		const string SettingsFilePath = "Assets/Config/settings.json";
+		const string SettingsFilePath = "Config/settings.json";
 
 		#region Performance Settings
 
+		[InspectorLabel("GPU Readback Timeout")]
+		[Tooltip("Maximum time in seconds to wait for GPU readback to complete before timing out.")]
+		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout", "Maximum time in seconds to wait for GPU readback to complete before timing out.", 10.0f, 5.0f, 30.0f);
+
 		[InspectorLabel("Max Chunk Operation Wait Time")]
 		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
-		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max Chunk Operation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 5.0f, 30.0f);
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max Chunk Operation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 30.0f, 5.0f, 30.0f);
 
 		#endregion
 
@@ -29,7 +33,7 @@ namespace Settings {
 			false,
 			new ISettingsChangeListener[] {
 				new SettingsChangeListener<StatsDisplay.DisplayMode>(value => {
-					StatsDisplay statsDisplay = FindObjectOfType<StatsDisplay>();
+					StatsDisplay statsDisplay = FindFirstObjectByType<StatsDisplay>();
 					if(statsDisplay != null) {
 						statsDisplay.enabled = value != StatsDisplay.DisplayMode.None;
 						Debug.Log($"Stats Overlay Mode set to {value}");
@@ -38,55 +42,6 @@ namespace Settings {
 			});
 
 		#endregion
-
-		public static EngineSettings Instance { get; private set; }
-
-		void Start() {
-			Instance = this;
-			LoadSettings();
-		}
-
-		/**
-		 * Loads the settings from the config file.
-		 */
-		public void LoadSettings() {
-			if(File.Exists(SettingsFilePath)) {
-				try {
-					string json = File.ReadAllText(SettingsFilePath);
-					JsonUtility.FromJsonOverwrite(json, this);
-					Debug.Log("Settings loaded from " + SettingsFilePath);
-				} catch(Exception e) {
-					Debug.LogWarning("Failed to load settings from " + SettingsFilePath + ": " + e.Message);
-					SetDefaults();
-				}
-			} else {
-				Debug.LogWarning("Settings file not found at " + SettingsFilePath + ". Using default settings.");
-				SetDefaults();
-			}
-
-			// Apply settings
-			FPSLimit.SetValue(FPSLimit.Value);
-			VSyncMode.SetValue(VSyncMode.Value);
-		}
-
-		/**
-		 * Saves the current settings to the config file.
-		 */
-		public void SaveSettings() {
-			string json = JsonUtility.ToJson(this, true);
-			File.WriteAllText(SettingsFilePath, json);
-			Debug.Log("Settings saved to " + SettingsFilePath);
-		}
-
-		/**
-		 * Resets all settings to their default values and saves them.
-		 */
-		public void SetDefaults() {
-			FPSLimit.SetValue(FPSLimit.DefaultValue);
-			VSyncMode.SetValue(VSyncMode.DefaultValue);
-
-			SaveSettings();
-		}
 
 		#region Graphics Settings
 
@@ -119,5 +74,53 @@ namespace Settings {
 
 		#endregion
 
+		public static EngineSettings Instance { get; private set; }
+
+		void Start() {
+			Instance = this;
+			LoadSettings();
+		}
+
+		/**
+		* Loads the settings from the config file.
+		*/
+		public void LoadSettings() {
+			if(File.Exists(SettingsFilePath)) {
+				try {
+					string json = File.ReadAllText(SettingsFilePath);
+					JsonUtility.FromJsonOverwrite(json, this);
+					Debug.Log("Settings loaded from " + SettingsFilePath);
+				} catch(Exception e) {
+					Debug.LogWarning("Failed to load settings from " + SettingsFilePath + ": " + e.Message);
+					SetDefaults();
+				}
+			} else {
+				Debug.LogWarning("Settings file not found at " + SettingsFilePath + ". Using default settings.");
+				SetDefaults();
+			}
+
+			// Apply settings
+			FPSLimit.SetValue(FPSLimit.Value);
+			VSyncMode.SetValue(VSyncMode.Value);
+		}
+
+		/**
+		* Saves the current settings to the config file.
+		*/
+		public void SaveSettings() {
+			string json = JsonUtility.ToJson(this, true);
+			File.WriteAllText(SettingsFilePath, json);
+			Debug.Log("Settings saved to " + SettingsFilePath);
+		}
+
+		/**
+		* Resets all settings to their default values and saves them.
+		*/
+		public void SetDefaults() {
+			FPSLimit.SetValue(FPSLimit.DefaultValue);
+			VSyncMode.SetValue(VSyncMode.DefaultValue);
+
+			SaveSettings();
+		}
 	}
 }

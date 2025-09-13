@@ -20,7 +20,7 @@ namespace Universe.Data.Chunk {
 		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
 		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
 
-		public static ChunkBuildResult BuildChunk(IChunkData chunk, Vector3 chunkPosition) {
+		public static ChunkBuildResult BuildChunk(IChunkData chunk) {
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
@@ -87,17 +87,15 @@ namespace Universe.Data.Chunk {
 				mask[index] = new short[s];
 			}
 
-			ushort GetTypeClamped(int x, int y, int z) {
+			short GetTypeClamped(int x, int y, int z) {
 				if(x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
 					// Ask external resolver (neighbor chunks) if available; otherwise treat as air.
 					if(ExternalBlockResolver != null) {
-						return (ushort)ExternalBlockResolver(chunk, x, y, z);
+						return ExternalBlockResolver(chunk, x, y, z);
 					}
-
 					return 0;
 				}
-
-				return (ushort)chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
+				return chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
 			}
 
 			void GreedySlice(int axis, int sgn) {
@@ -112,8 +110,8 @@ namespace Universe.Data.Chunk {
 							int x = i;
 							int y = v;
 							int z = u;
-							ushort a = GetTypeClamped(x, y, z);
-							ushort b = GetTypeClamped(x + sgn, y, z);
+							short a = GetTypeClamped(x, y, z);
+							short b = GetTypeClamped(x + sgn, y, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
 					} else if(axis == 1) {
@@ -122,8 +120,8 @@ namespace Universe.Data.Chunk {
 						for(int v = 0; v < H; v++)
 						for(int u = 0; u < W; u++) {
 							int x = u, y = i, z = v;
-							ushort a = GetTypeClamped(x, y, z);
-							ushort b = GetTypeClamped(x, y + sgn, z);
+							short a = GetTypeClamped(x, y, z);
+							short b = GetTypeClamped(x, y + sgn, z);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
 					} else {
@@ -132,8 +130,8 @@ namespace Universe.Data.Chunk {
 						for(int v = 0; v < H; v++)
 						for(int u = 0; u < W; u++) {
 							int x = u, y = v, z = i;
-							ushort a = GetTypeClamped(x, y, z);
-							ushort b = GetTypeClamped(x, y, z + sgn);
+							short a = GetTypeClamped(x, y, z);
+							short b = GetTypeClamped(x, y, z + sgn);
 							mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
 						}
 					}

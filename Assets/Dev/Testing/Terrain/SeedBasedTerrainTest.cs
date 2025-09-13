@@ -21,17 +21,13 @@ namespace Dev.Testing.Terrain {
 				Debug.LogError("GlobalChunkMemoryManager not found! Make sure it's in the scene.");
 				return;
 			}
-
-			if(asteroidSettings == null) {
-				asteroidSettings = AsteroidGenerationSettings.CreateDefault(chunkDimensions);
-			}
-
+			asteroidSettings ??= AsteroidGenerationSettings.CreateDefault(chunkDimensions);
 			GenerateTestAsteroid();
 		}
 
-		void OnDestroy() {
+		/*void OnDestroy() {
 			// Clean up any chunks we allocated
-			var asteroids = FindObjectsOfType<GameEntity>();
+			var asteroids = FindObjectsByType<GameEntity>(FindObjectsSortMode.None);
 			foreach(GameEntity entity in asteroids) {
 				if(entity.Chunks != null) {
 					for(int i = 0; i < entity.Chunks.Length; i++) {
@@ -39,35 +35,30 @@ namespace Dev.Testing.Terrain {
 					}
 				}
 			}
-		}
+		}*/
 
 		void GenerateTestAsteroid() {
-			Debug.Log("=== Generating Test Asteroid with Global Memory System ===");
-
+			Debug.Log("=== Generating Test Asteroid ===");
 			GameEntity entity = new GameObject("TestAsteroid").AddComponent<Asteroid>();
-
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);
 			entity.chunkDimensions = chunkDimensions;
-
 			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
 			entity.AllocateChunks(chunksTotal);
-
 			SetupCrossChunkResolver(entity);
 
 			// Generate chunks using the new global memory system
 			GenerateChunksWithGlobalMemory(entity);
 
 			// Build the mesh
-			ChunkGenerationQueue chunkGenQueue = FindObjectOfType<ChunkGenerationQueue>();
+			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
 			if(chunkGenQueue != null) {
 				chunkGenQueue.RequestMeshRebuild(entity);
 			} else {
 				Debug.LogWarning("ChunkGenerationQueue not found - triggering immediate mesh rebuild");
 				entity.RebuildMesh();
 			}
-
 			PrintMemoryStatistics("After generating first asteroid");
 		}
 
@@ -102,7 +93,6 @@ namespace Dev.Testing.Terrain {
 				// Log generation info
 				Debug.Log($"Generated chunk [{chunkX},{chunkY},{chunkZ}] with ID: {chunkID}");
 			}
-
 			Debug.Log($"Successfully generated {chunksTotal} chunks in global memory system");
 		}
 
@@ -113,7 +103,6 @@ namespace Dev.Testing.Terrain {
 
 			// Add world seed to ensure uniqueness across different worlds/sessions
 			long hashedID = baseID ^ worldSeed >> 16;
-
 			return hashedID;
 		}
 

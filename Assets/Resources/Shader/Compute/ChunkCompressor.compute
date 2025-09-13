@@ -6,6 +6,8 @@
 // Input: 32x32x32 blocks, 4 bytes each (int)
 // Output: Compressed data (byte stream), metadata (compressed size)
 
+#pragma kernel CSMain
+
 StructuredBuffer<int>    ChunkInput; // [32*32*32] input blocks
 RWByteAddressBuffer      ChunkCompressedOutput; // Output compressed data
 RWStructuredBuffer<uint> ChunkMetadata; // [0]=compressed size, [1]=original size, [2]=flags

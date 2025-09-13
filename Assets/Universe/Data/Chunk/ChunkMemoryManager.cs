@@ -17,17 +17,15 @@ namespace Universe.Data.Chunk {
 
 		// Waits for a chunk's GPU operation (compression or decompression) to complete.
 		// Returns true if the operation completed successfully, false otherwise.
-		bool WaitForChunkOperation(long chunkID) {
-			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation operation))
-				return false;
-
+		void WaitForChunkOperation(long chunkID) {
+			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation operation)) {
+				return;
+			}
 			// Wait for the TaskCompletionSource to complete (blocking)
 			try {
-				bool completed = operation.CompletionSource.Task.Wait(TimeSpan.FromSeconds(ChunkOperationTimeout));
-				return completed && operation.CompletionSource.Task.Result;
+				operation.CompletionSource.Task.Wait(TimeSpan.FromSeconds(ChunkOperationTimeout));
 			} catch(Exception ex) {
 				Debug.LogError($"Error waiting for chunk operation: {ex.Message}");
-				return false;
 			}
 		}
 
@@ -78,7 +76,7 @@ namespace Universe.Data.Chunk {
 
 		#region GPU Resources
 
-		public ChunkCompressionManager CompressionManager = new ChunkCompressionManager();
+		public ChunkCompressionManager CompressionManager => ChunkCompressionManager.Instance;
 
 		[Header("GPU Compression")] [SerializeField]
 		public ComputeShader compressionShader;
@@ -86,9 +84,9 @@ namespace Universe.Data.Chunk {
 		[SerializeField] public ComputeShader decompressionShader;
 
 		// GPU buffers for compression operations
-		public ComputeBuffer _gpuInputBuffer; // Input data for compression
-		public ComputeBuffer _gpuOutputBuffer; // Output data from compression
-		public ComputeBuffer _gpuMetadataBuffer; // Compression metadata
+		public ComputeBuffer GPUInputBuffer; // Input data for compression
+		public ComputeBuffer GPUOutputBuffer; // Output data from compression
+		public ComputeBuffer GPUMetadataBuffer; // Compression metadata
 
 		// Async operation tracking
 		Dictionary<long, CompressionOperation> _activeOperations;
@@ -172,9 +170,13 @@ namespace Universe.Data.Chunk {
 		public static ChunkMemoryManager Instance { get; private set; }
 
 		void Awake() {
+			if(Instance != null) {
+				Debug.LogError("Multiple ChunkMemoryManager instances found!");
+				Destroy(gameObject);
+				return;
+			}
 			Instance = this;
 			DontDestroyOnLoad(gameObject);
-
 			InitializeMemoryPools();
 			InitializeGPUResources();
 		}
@@ -212,9 +214,9 @@ namespace Universe.Data.Chunk {
 			}
 
 			// Create GPU buffers for batch compression operations
-			_gpuInputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int));
-			_gpuOutputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int)); // Max size
-			_gpuMetadataBuffer = new ComputeBuffer(compressionBatchSize, sizeof(int) * 4); // Per-chunk metadata
+			GPUInputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int));
+			GPUOutputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int)); // Max size
+			GPUMetadataBuffer = new ComputeBuffer(compressionBatchSize, sizeof(int) * 4); // Per-chunk metadata
 		}
 
 		#endregion
@@ -316,11 +318,10 @@ namespace Universe.Data.Chunk {
 		#region Block Access Methods
 
 		public int GetRawData(long chunkID, int blockIndex) {
-			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
 				Debug.LogError($"Cannot access chunk {chunkID} for reading");
 				return 0;
-			}
-
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			int globalIndex = allocation.PoolIndex * BlocksPerChunk + blockIndex;
@@ -328,11 +329,10 @@ namespace Universe.Data.Chunk {
 		}
 
 		public void SetRawData(long chunkID, int blockIndex, int rawData) {
-			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
-				Debug.LogError($"Cannot access chunk {chunkID} for writing");
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
 				return;
-			}
-
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			MarkChunkDirty(chunkID);
@@ -341,16 +341,14 @@ namespace Universe.Data.Chunk {
 		}
 
 		public int[] GetRawDataArray(long chunkID) {
-			if(!EnsureChunkAccessibleAsync(chunkID).Result) {
-				return new int[BlocksPerChunk]; // Return empty array
-			}
-
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return null;
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
-
 			int startIndex = allocation.PoolIndex * BlocksPerChunk;
 			var slice = _uncompressedPool.GetSubArray(startIndex, BlocksPerChunk);
-
 			return slice.ToArray();
 		}
 
@@ -360,7 +358,10 @@ namespace Universe.Data.Chunk {
 				return;
 			}
 
-			if(!EnsureChunkAccessibleAsync(chunkID).Result) return;
+			/*if(!EnsureChunkAccessibleAsync(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return;
+			}*/
 
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
@@ -376,41 +377,10 @@ namespace Universe.Data.Chunk {
 
 		#region Compression Management
 
-		bool EnsureChunkAccessible(long chunkID) {
-			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
-				Debug.LogError($"Chunk {chunkID} not allocated!");
-				return false;
-			}
-
-			// If already uncompressed, we're good
-			if(allocation.State == ChunkState.Uncompressed) {
-				return true;
-			}
-
-			// If compressed, we need to decompress synchronously (blocking operation)
-			if(allocation.State == ChunkState.Compressed) {
-				// Use GPU decompression manager for blocking decompression
-				var decompressTask = CompressionManager?.DecompressChunkAsync(chunkID);
-				if(decompressTask != null) {
-					decompressTask.Wait();
-					return decompressTask.Result;
-				}
-
-				Debug.LogError("No GPUCompressionManager instance for decompression");
-				return false;
-			}
-
-			// If currently being processed, we need to wait or fail
-			if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
-				Debug.LogWarning($"Chunk {chunkID} is being processed, blocking access");
-				return WaitForChunkOperation(chunkID);
-			}
-
-			return false;
-		}
-
-		// Async version of EnsureChunkAccessible for non-blocking decompression
-		public async Task<bool> EnsureChunkAccessibleAsync(long chunkID) {
+		/**
+		 * Ensures the specified chunk is accessible for reading/writing. If the chunk is compressed, it will be decompressed asynchronously.
+		 */
+		public async Task<bool> EnsureChunkAccessible(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				Debug.LogError($"Chunk {chunkID} not allocated!");
 				return false;
@@ -423,10 +393,9 @@ namespace Universe.Data.Chunk {
 
 			// If compressed, decompress asynchronously
 			if(allocation.State == ChunkState.Compressed) {
-				if (CompressionManager != null) {
-					return await DecompressChunkAsync(chunkID);
-				}
-				Debug.LogError("No GPUCompressionManager instance for decompression");
+				/*if (CompressionManager != null) {
+					return await DecompressChunk(chunkID);
+				}*/
 				return false;
 			}
 
@@ -441,13 +410,11 @@ namespace Universe.Data.Chunk {
 						return false;
 					}
 				}
-				return false;
 			}
-
 			return false;
 		}
 
-		public async Task<bool> CompressChunkAsync(long chunkID) {
+		public async Task<bool> CompressChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
 			}
@@ -473,7 +440,7 @@ namespace Universe.Data.Chunk {
 			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
-					CompressedChunk compressedChunk = await compressionManager.CompressChunkAsync(chunkID);
+					await compressionManager.CompressChunk(chunkID);
 					operation.CompletionSource.SetResult(true);
 				} catch(Exception ex) {
 					Debug.LogError($"GPU compression failed: {ex.Message}");
@@ -483,11 +450,10 @@ namespace Universe.Data.Chunk {
 				Debug.LogError("No GPUCompressionManager instance for compression");
 				operation.CompletionSource.SetResult(false);
 			}
-
 			return await operation.CompletionSource.Task;
 		}
 
-		public async Task<bool> DecompressChunkAsync(long chunkID) {
+		public async Task<bool> DecompressChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
 			}
@@ -513,7 +479,8 @@ namespace Universe.Data.Chunk {
 			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
-					bool result = await compressionManager.DecompressChunkAsync(chunkID);
+					var header = await compressionManager.DecompressChunk(chunkID);
+					bool result = header.State == ChunkState.Uncompressed;
 					operation.CompletionSource.SetResult(result);
 				} catch(Exception ex) {
 					Debug.LogError($"GPU decompression failed: {ex.Message}");
@@ -523,7 +490,6 @@ namespace Universe.Data.Chunk {
 				Debug.LogError("No GPUCompressionManager instance for decompression");
 				operation.CompletionSource.SetResult(false);
 			}
-
 			return await operation.CompletionSource.Task;
 		}
 
@@ -563,7 +529,7 @@ namespace Universe.Data.Chunk {
 
 			if(oldestChunkID != -1) {
 				// Start async compression of oldest chunk
-				CompressChunkAsync(oldestChunkID);
+				CompressChunk(oldestChunkID);
 				return true;
 			}
 
@@ -573,23 +539,37 @@ namespace Universe.Data.Chunk {
 		/**
 		 * Compresses all chunks belonging to the specified entity and returns the compressed data as a byte array so it can be written to disk.
 		 */
-		public byte[] CompressEntity(GameEntity.GameEntity entity) {
+		public async Task<byte[]> CompressEntity(GameEntity.GameEntity entity) {
 			var entityData = new System.IO.MemoryStream();
+			var compressionTasks = new List<Task<bool>>();
+			var chunkIDsToCompress = new List<long>();
+
+			// First, start compression tasks for all uncompressed chunks
 			foreach(var chunk in entity.Chunks) {
 				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
 					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
 					continue;
 				}
 
-				// Ensure chunk is compressed
 				if(allocation.State == ChunkState.Uncompressed) {
-					var compressTask = CompressChunkAsync(chunk._chunkID);
-					compressTask.Wait();
-					if(!compressTask.Result) {
-						Debug.LogError($"Failed to compress chunk {chunk._chunkID}");
-						continue;
-					}
-				} else if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
+					compressionTasks.Add(CompressChunk(chunk._chunkID));
+					chunkIDsToCompress.Add(chunk._chunkID);
+				}
+			}
+
+			// Await all compression tasks
+			if(compressionTasks.Count > 0) {
+				await Task.WhenAll(compressionTasks);
+			}
+
+			// Now, collect compressed data for all chunks
+			foreach(var chunk in entity.Chunks) {
+				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
+					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
+					continue;
+				}
+
+				if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
 					Debug.LogWarning($"Chunk {chunk._chunkID} is being processed, waiting for compression");
 					WaitForChunkOperation(chunk._chunkID);
 				}
@@ -660,9 +640,9 @@ namespace Universe.Data.Chunk {
 			if(_headers.IsCreated) _headers.Dispose();
 
 			// Dispose GPU buffers
-			_gpuInputBuffer?.Dispose();
-			_gpuOutputBuffer?.Dispose();
-			_gpuMetadataBuffer?.Dispose();
+			GPUInputBuffer?.Dispose();
+			GPUOutputBuffer?.Dispose();
+			GPUMetadataBuffer?.Dispose();
 		}
 
 		void Update() {

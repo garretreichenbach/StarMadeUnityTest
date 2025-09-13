@@ -4,7 +4,7 @@ namespace Dev {
 	public class FPSReporter : MonoBehaviour, StatsDisplay.IStatsDisplayReporter {
 
 		void Start() {
-			StatsDisplay statsDisplay = FindObjectOfType<StatsDisplay>();
+			StatsDisplay statsDisplay = FindFirstObjectByType<StatsDisplay>();
 			if(statsDisplay != null) {
 				statsDisplay.Reporters.Add(this);
 			} else {

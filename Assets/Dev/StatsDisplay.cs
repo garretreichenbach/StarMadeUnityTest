@@ -2,9 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Unity.VisualScripting;
+using UnityEditor;
 using UnityEngine;
 
 namespace Dev {
+
+	[CustomEditor(typeof(StatsDisplay), false)]
+	public class StatsEditor : Editor {
+		public override void OnInspectorGUI() {
+			DrawDefaultInspector();
+			EditorGUILayout.TextArea((target as StatsDisplay)?.stats ?? "", GUILayout.Height(200));
+		}
+	}
 
 	/**
 	 * Simple stats display for showing FPS, ping, network stats, render stats, entity stats, and sector stats.
@@ -19,12 +28,10 @@ namespace Dev {
 			RenderStats = 8,
 			EntityStats = 16,
 			MemoryStats = 32,
-			All = FPS | Ping | PacketStats | RenderStats | EntityStats | MemoryStats,
 		}
 
 
-		[InspectorLabel("Stats")]
-		public string stats = "";
+		internal protected string stats = "";
 
 		public DisplayMode Mode = DisplayMode.FPS | DisplayMode.Ping;
 
