@@ -23,7 +23,7 @@ namespace Universe.World {
 			get {
 				int count = 0;
 				foreach(var entity in _activeEntities.Values) {
-					if(entity.ChunkLoaded) {
+					if(entity.Loaded) {
 						count++;
 					}
 				}
@@ -37,11 +37,40 @@ namespace Universe.World {
 			get {
 				int count = 0;
 				foreach(var entity in _activeEntities.Values) {
-					if(!entity.ChunkLoaded) {
+					if(!entity.Loaded) {
 						count++;
 					}
 				}
 				return count;
+			}
+		}
+
+		public bool DrawDebugInfo {
+			get {
+				if(_activeEntities.Count == 0) {
+					return false;
+				}
+				foreach(var entity in _activeEntities.Values) {
+					if(entity != null && entity.DrawDebugInfo) {
+						return true;
+					}
+				}
+				return false;
+			}
+			set {
+				if(DrawDebugInfo) {
+					foreach(var entity in _activeEntities.Values) {
+						if(entity != null) {
+							entity.DrawDebugInfo = true;
+						}
+					}
+				} else {
+					foreach(var entity in _activeEntities.Values) {
+						if(entity != null) {
+							entity.DrawDebugInfo = false;
+						}
+					}
+				}
 			}
 		}
 
@@ -76,7 +105,6 @@ namespace Universe.World {
 			}
 			var filePath = System.IO.Path.Combine(folderPath, $"{UniverseName}.db");
 			_db = new SQLiteConnection(filePath);
-
 			_db.CreateTable<GameEntity.GameEntityData>();
 		}
 
@@ -87,22 +115,21 @@ namespace Universe.World {
 		public Task<GameEntity.GameEntityData> LoadEntity(string UID, bool loadPhysical = false) {
 			GameEntity.GameEntityData data = _db.Find<GameEntity.GameEntityData>(e => e.UID == UID);
 			//Check if entity already exists in scene
-			GameObject entityObj = GameObject.Find(data.UID);
+			GameObject entityObj = GameObject.Find(data.UID); //Todo: Change this to a more efficient lookup
 			if(entityObj == null) {
 				entityObj = new GameObject(data.UID);
 			}
 			GameEntity entityComp = null;
 			switch(data.EntityType) {
 				case GameEntityType.Asteroid:
-					entityComp = entityObj.AddComponent<Asteroid>();
+					entityComp = entityObj.GetComponent<Asteroid>(); //Todo: These method calls are expensive, replace with something better
 					break;
 			}
 			if(entityComp == null) {
-				Debug.LogError($"Failed to create entity of type {data.EntityType} for entity ID {data.UID}");
+				Debug.LogError($"Failed to load entity of type {data.EntityType} for entity ID {data.UID}");
 				throw new System.Exception($"Failed to create entity of type {data.EntityType} for entity ID {data.UID}");
 			}
 			entityComp.Data = data;
-			entityObj.SetActive(true);
 			_activeEntities[data.UID].Data = data;
 			entityComp.Data = data;
 			if(loadPhysical) {
@@ -118,16 +145,15 @@ namespace Universe.World {
 		public Task UnloadEntity(string entityUID, bool unloadPhysicalOnly = false) {
 			if(_activeEntities.ContainsKey(entityUID)) {
 				GameEntity entity = _activeEntities[entityUID];
-				if(entity.ChunkLoaded) {
+				if(entity.Loaded) {
 					if(entity != null) {
 						_ = entity.WriteChunkData();
-						entity.ChunkLoaded = false;
+						entity.Loaded = false;
 					} else {
 						Debug.LogWarning($"Entity {entityUID} is marked as loaded but could not find the component in the scene.");
 					}
 					if(unloadPhysicalOnly) {
 						entity.RebuildMesh();
-						entity.gameObject.SetActive(false);
 					} else {
 						Destroy(entity.gameObject);
 						_activeEntities.Remove(entityUID);
@@ -147,7 +173,7 @@ namespace Universe.World {
 				var entityObj = GameObject.Find(entityUID);
 				if(entityObj != null) {
 					var entityComp = entityObj.GetComponent<GameEntity>();
-					if(entityComp != null && entityComp.ChunkLoaded) {
+					if(entityComp != null && entityComp.Loaded) {
 						return entityComp;
 					}
 				}

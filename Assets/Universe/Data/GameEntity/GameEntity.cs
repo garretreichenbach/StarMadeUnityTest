@@ -53,7 +53,7 @@ namespace Universe.Data.GameEntity {
 			set => Data.SectorID = value;
 		}
 
-		public bool ChunkLoaded {
+		public bool Loaded {
 			get => Data.ChunkLoaded;
 			set => Data.ChunkLoaded = value;
 		}
@@ -68,10 +68,20 @@ namespace Universe.Data.GameEntity {
 			set => Data.ChunkDimensions = new[] { value.x, value.y, value.z };
 		}
 
+		public Vector3Int Sector {
+			get {
+				return Galaxy.Instance.GetSectorCoordsFromID(SectorID);
+			}
+			set {
+				SectorID = Galaxy.Instance.GetSectorIDFromCoords(value);
+			}
+		}
+
 		string ChunkDataPath => EntityDatabaseManager.Instance.GetChunkDataPath(UID);
 
+		public bool DrawDebugInfo { get; set; } = true;
 
-		[Header("Debug Stats")]
+		[Header("Draw Stats")]
 		public int blockCount;
 		public int triangleCount;
 		public int vertexCount;
@@ -79,8 +89,19 @@ namespace Universe.Data.GameEntity {
 		public GameEntityData Data;
 		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
+		void OnGUI() {
+			if(!DrawDebugInfo) return;
+			string debugText;
+			if(Loaded) {
+				debugText = $"{Name} (ID: {EntityID})\nType: {Type}\nChunks: {ChunkCount} ({ChunkDimensions.x}x{ChunkDimensions.y}x{ChunkDimensions.z})\nBlocks: {blockCount}\nTriangles: {triangleCount}\nVertices: {vertexCount}\nSector: {Sector}\nFaction: {FactionID}";
+			} else {
+				debugText = $"{Name} (ID: {EntityID})\nType: {Type}\nChunks: Not Loaded\nSector: {Sector}\nFaction: {FactionID}";
+			}
+			Handles.Label(transform.position + Vector3.up * 2, debugText);
+		}
+
 		public async Task<bool> LoadChunkData() {
-			if(ChunkLoaded) {
+			if(Loaded) {
 				Debug.LogWarning($"Entity {Name} is already loaded. Cannot load chunk data.");
 				return false;
 			}
@@ -90,13 +111,13 @@ namespace Universe.Data.GameEntity {
 				return false;
 			}
 			_ = await ChunkMemoryManager.Instance.DecompressEntity(this, rawCompressedData);
-			ChunkLoaded = true;
+			Loaded = true;
 			RebuildMesh();
 			return true;
 		}
 
 		public async Task<bool> WriteChunkData() {
-			if(!ChunkLoaded) {
+			if(!Loaded) {
 				Debug.LogWarning($"Entity {Name} is not loaded. Cannot write chunk data.");
 				return false;
 			}
@@ -117,20 +138,18 @@ namespace Universe.Data.GameEntity {
 		}
 
 		public void RebuildMesh() {
-			if(!ChunkLoaded) {
-				//Unload mesh
-				//Todo: This isnt working!!!
-				GetComponent<MeshFilter>().mesh.Clear();
-				GetComponent<MeshFilter>().mesh = null;
-				GetComponent<MeshRenderer>().material = null;
+			MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
+			MeshFilter meshFilter = GetComponent<MeshFilter>();
+			blockCount = 0;
+			triangleCount = 0;
+			vertexCount = 0;
+			if(!Loaded) {
+				meshFilter.mesh.Clear();
+				meshFilter.mesh.RecalculateBounds();
 				return;
 			}
 
 			var combine = new CombineInstance[Chunks.Length];
-			blockCount = 0;
-			triangleCount = 0;
-			vertexCount = 0;
-
 			for(int i = 0; i < Chunks.Length; i++) {
 				Vector3 chunkPos = GetChunkPosition(i);
 				ChunkBuildResult result = ChunkBuilder.BuildChunk(GetChunkData(i));
@@ -141,12 +160,10 @@ namespace Universe.Data.GameEntity {
 				vertexCount += result.vertexCount;
 			}
 
-			MeshFilter meshFilter = GetComponent<MeshFilter>();
 			if(meshFilter == null) {
 				meshFilter = gameObject.AddComponent<MeshFilter>();
 			}
 
-			MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
 			if(meshRenderer == null) {
 				meshRenderer = gameObject.AddComponent<MeshRenderer>();
 				meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
@@ -155,6 +172,17 @@ namespace Universe.Data.GameEntity {
 			Mesh mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
 			meshFilter.mesh = mesh;
+			RequestMeshRebuild();
+		}
+
+		public void RequestMeshRebuild() {
+			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
+			if(chunkGenQueue != null) {
+				chunkGenQueue.RequestMeshRebuild(this);
+			} else {
+				Debug.LogWarning("ChunkGenerationQueue not found - triggering immediate mesh rebuild");
+				RebuildMesh();
+			}
 		}
 
 		public void AllocateChunks(Vector3Int chunkDimensions) {
@@ -162,7 +190,7 @@ namespace Universe.Data.GameEntity {
 			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
 			Chunks = new ChunkData[chunksTotal];
 			ChunkCount = chunksTotal;
-			ChunkLoaded = true;
+			Loaded = true;
 		}
 
 		[Serializable]

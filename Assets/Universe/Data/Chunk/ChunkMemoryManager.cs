@@ -106,9 +106,9 @@ namespace Universe.Data.Chunk {
 			public int ChunkIndexInEntity; // Index within the entity's chunk array
 		}
 
-		/// <summary>
-		///     Represents the metadata and status information for a chunk of memory in the ChunkMemoryManager system.
-		/// </summary>
+		/**
+		* Metadata header for each chunk, tracking state, timestamps, and integrity info.
+		*/
 		public struct ChunkHeader {
 			public long ChunkID;
 			public ChunkState State;
@@ -121,28 +121,26 @@ namespace Universe.Data.Chunk {
 			public uint Checksum; // Data integrity check
 		}
 
-		/// <summary>
-		///     Represents a section of allocated space within the compressed memory pool, used to manage compressed chunks of
-		///     data.
-		/// </summary>
+		/**
+		* Represents a free slot in the compressed memory pool.
+		*/
 		public struct CompressedSlot {
 			public int Offset;
 			public int Size;
 		}
 
-		/// <summary>
-		///     Represents a compressed chunk of memory, including its unique identifier, offset, and size information.
-		/// </summary>
+		/**
+		* Represents a compressed chunk's metadata within the compressed memory pool.
+		*/
 		public struct CompressedChunk {
 			public long ChunkID;
 			public int Offset;
 			public int Size;
 		}
 
-		/// <summary>
-		///     Represents the various states of a chunk in the ChunkMemoryManager system,
-		///     indicating its current allocation and processing status.
-		/// </summary>
+		/**
+		* Represents the current state of a chunk in memory, including whether it is unallocated, uncompressed,
+		*/
 		public enum ChunkState {
 			Unallocated,
 			Uncompressed,
@@ -152,9 +150,9 @@ namespace Universe.Data.Chunk {
 			Error,
 		}
 
-		/// <summary>
-		///     Represents an operation to transition a chunk's data to a target state, such as compression or decompression.
-		/// </summary>
+		/**
+		* Tracks an ongoing compression or decompression operation for a chunk.
+		*/
 		public struct CompressionOperation {
 			public long ChunkID;
 			public ChunkState TargetState;
@@ -224,9 +222,10 @@ namespace Universe.Data.Chunk {
 		#region Core Memory Operations
 
 		public bool AllocateChunk(long chunkID, int entityID = -1, int chunkIndex = -1) {
+			// If chunk already exists, forcibly deallocate it first
 			if(_allocations.ContainsKey(chunkID)) {
-				Debug.LogWarning($"Chunk {chunkID} already allocated!");
-				return false;
+				Debug.LogWarning($"[AllocateChunk] Chunk {chunkID} already allocated. Forcibly deallocating before re-allocation.");
+				DeallocateChunk(chunkID);
 			}
 
 			if(_freeUncompressedSlots.Count == 0) {
@@ -273,23 +272,32 @@ namespace Universe.Data.Chunk {
 
 		public void DeallocateChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+				Debug.Log($"[DeallocateChunk] Chunk {chunkID} not found in allocations.");
 				return;
 			}
 
 			// Cancel any active operations on this chunk
 			if(_activeOperations.ContainsKey(chunkID)) {
+				Debug.Log($"[DeallocateChunk] Cancelling active operation for chunk {chunkID} (state: {allocation.State})");
 				_activeOperations[chunkID].CompletionSource?.SetCanceled();
 				_activeOperations.Remove(chunkID);
 			}
 
+			// If chunk is in GPUDecompressing or GPUCompressing, forcibly reset state
+			if(allocation.State == ChunkState.GPUDecompressing || allocation.State == ChunkState.GPUCompressing) {
+				Debug.LogWarning($"[DeallocateChunk] Chunk {chunkID} was in {allocation.State} state. Forcibly resetting to Uncompressed before removal.");
+				allocation.State = ChunkState.Uncompressed;
+				_allocations[chunkID] = allocation; // <-- Ensure dictionary is updated
+			}
+
 			// Free the appropriate slot
-			if(allocation.State == ChunkState.Uncompressed || allocation.State == ChunkState.GPUCompressing) {
+			if(allocation.State == ChunkState.Uncompressed) {
 				if(allocation.PoolIndex >= 0) {
 					_freeUncompressedSlots.Enqueue(allocation.PoolIndex);
 				}
 			}
 
-			if(allocation.State == ChunkState.Compressed || allocation.State == ChunkState.GPUDecompressing) {
+			if(allocation.State == ChunkState.Compressed) {
 				if(allocation.CompressedOffset >= 0 && allocation.CompressedSize > 0) {
 					_freeCompressedSlots.Enqueue(new CompressedSlot {
 						Offset = allocation.CompressedOffset,
@@ -300,6 +308,7 @@ namespace Universe.Data.Chunk {
 
 			_allocations.Remove(chunkID);
 			_headers.Remove(chunkID);
+			Debug.Log($"[DeallocateChunk] Chunk {chunkID} fully deallocated.");
 		}
 
 		void ClearChunkMemory(int poolIndex) {
@@ -457,33 +466,47 @@ namespace Universe.Data.Chunk {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
 			}
-
+			// Prevent re-entrancy: don't decompress if already decompressing
+			if(allocation.State == ChunkState.GPUDecompressing) {
+				Debug.LogWarning($"Attempted to decompress chunk {chunkID} but it is already in GPUDecompressing state.");
+				return false;
+			}
 			if(allocation.State != ChunkState.Compressed) {
+				Debug.LogError($"[DecompressChunk] Chunk {chunkID} is not in Compressed state, but {allocation.State}");
 				return false; // Can only decompress compressed chunks
 			}
-
-			// Mark as being decompressed
-			allocation.State = ChunkState.GPUDecompressing;
-			_allocations[chunkID] = allocation;
-
+			// Do NOT set state to GPUDecompressing here!
+			Debug.Log($"[DecompressChunk] Chunk {chunkID} calling compressionManager.DecompressChunk");
 			CompressionOperation operation = new CompressionOperation {
 				ChunkID = chunkID,
 				TargetState = ChunkState.Uncompressed,
 				CompletionSource = new TaskCompletionSource<bool>(),
 				StartTime = Time.time,
 			};
-
 			_activeOperations[chunkID] = operation;
-
-			// Use GPUCompressionManager for actual decompression
 			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
-					var header = await compressionManager.DecompressChunk(chunkID);
-					bool result = header.State == ChunkState.Uncompressed;
-					operation.CompletionSource.SetResult(result);
+					await compressionManager.DecompressChunk(chunkID);
+					// After decompression, verify state
+					allocation = _allocations[chunkID];
+					if(allocation.State == ChunkState.Uncompressed) {
+						Debug.Log($"[DecompressChunk] Chunk {chunkID} successfully decompressed and state set to Uncompressed");
+						operation.CompletionSource.SetResult(true);
+					} else {
+						Debug.LogError($"Chunk {chunkID} state invalid after decompression: {allocation.State}");
+						allocation.State = ChunkState.Compressed;
+						_allocations[chunkID] = allocation;
+						operation.CompletionSource.SetException(new Exception("Invalid chunk state after decompression"));
+					}
 				} catch(Exception ex) {
-					Debug.LogError($"GPU decompression failed: {ex.Message}");
+					Debug.LogError($"GPU decompression failed: {ex.Message}, ChunkState: {allocation.State}");
+					// Reset state so chunk can be retried
+					if(_allocations.TryGetValue(chunkID, out var failedAlloc)) {
+						failedAlloc.State = ChunkState.Compressed;
+						_allocations[chunkID] = failedAlloc;
+						Debug.LogWarning($"[DecompressChunk] Chunk {chunkID} state forcibly reset to Compressed after failure.");
+					}
 					operation.CompletionSource.SetException(ex);
 				}
 			} else {
@@ -527,7 +550,7 @@ namespace Universe.Data.Chunk {
 
 			if(oldestChunkID != -1) {
 				// Start async compression of oldest chunk
-				CompressChunk(oldestChunkID);
+				_ = CompressChunk(oldestChunkID);
 				return true;
 			}
 
@@ -543,6 +566,14 @@ namespace Universe.Data.Chunk {
 			int chunksTotal = gameEntity.ChunkCount;
 			int chunksRead = 0;
 			int chunksFailed = 0;
+
+			// Ensure the Chunks array is allocated and initialized to invalid
+			if(gameEntity.Chunks == null || gameEntity.Chunks.Length != gameEntity.ChunkCount) {
+				gameEntity.Chunks = new ChunkData[gameEntity.ChunkCount];
+				for(int i = 0; i < gameEntity.Chunks.Length; i++) {
+					gameEntity.Chunks[i] = new ChunkData(ChunkData.InvalidChunkID, 0);
+				}
+			}
 
 			while(entityData.Position < entityData.Length && chunksRead < chunksTotal) {
 				// Read chunk ID
@@ -578,13 +609,26 @@ namespace Universe.Data.Chunk {
 
 				if(allocation.State == ChunkState.Uncompressed) {
 					// Already uncompressed, skip
+					// But still assign the ChunkData object if not already assigned
+					if(!gameEntity.Chunks[allocation.ChunkIndexInEntity].IsValid) {
+						gameEntity.Chunks[allocation.ChunkIndexInEntity] = new ChunkData(chunkID, allocation.PoolIndex);
+					}
 					continue;
 				}
 
 				// Decompress chunk
-				decompressionTasks.Add(DecompressChunk(chunkID));
-				await Task.WhenAll(decompressionTasks);
-				decompressionTasks.Clear();
+				bool decompressed = await DecompressChunk(chunkID);
+				decompressionTasks.Add(Task.FromResult(decompressed));
+				if(decompressed) {
+					// After successful decompression, assign the ChunkData object
+					if(!gameEntity.Chunks[allocation.ChunkIndexInEntity].IsValid) {
+						gameEntity.Chunks[allocation.ChunkIndexInEntity] = new ChunkData(chunkID, allocation.PoolIndex);
+					}
+				} else {
+					Debug.LogError($"Failed to decompress chunk {chunkID} for entity {gameEntity.Name}");
+					chunksFailed++;
+					continue;
+				}
 
 				// Check if we need to start compression of an uncompressed chunk
 				if(TryFreeUncompressedSlot()) {
@@ -593,7 +637,6 @@ namespace Universe.Data.Chunk {
 				}
 
 				// Wait for all decompression tasks to complete
-				await Task.Delay(100);
 				await Task.WhenAll(decompressionTasks);
 				decompressionTasks.Clear();
 			}

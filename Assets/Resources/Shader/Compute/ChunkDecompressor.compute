@@ -29,10 +29,9 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 	uint dataStart = COLUMN_COUNT * 4; // Offset table is 4 bytes per column
 
 	// Read start and end offsets for this column
-	uint colOffset;
-	CompressedInput.Load(offsetTableStart + columnIndex * 4, colOffset);
+	uint colOffset = CompressedInput.Load(offsetTableStart + columnIndex * 4);
 	uint nextColOffset;
-	if(columnIndex < COLUMN_COUNT - 1) CompressedInput.Load(offsetTableStart + (columnIndex + 1) * 4, nextColOffset);
+	if(columnIndex < COLUMN_COUNT - 1) nextColOffset = CompressedInput.Load(offsetTableStart + (columnIndex + 1) * 4);
 	else nextColOffset = ChunkMetadata[0] - dataStart; // Last column: use compressed size
 
 	uint compressedPtr = dataStart + colOffset;
@@ -43,10 +42,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
 	// Decompress (value, runLength) pairs
 	while(compressedPtr + 8 <= compressedEnd && outIdx < CHUNK_SIZE_Z)
 	{
-		int  value;
-		uint runLength;
-		CompressedInput.Load(compressedPtr, value);
-		CompressedInput.Load(compressedPtr + 4, runLength);
+		int value = asint(CompressedInput.Load(compressedPtr));
+		uint runLength = CompressedInput.Load(compressedPtr + 4);
 		compressedPtr += 8;
 		for(uint r = 0; r < runLength && outIdx < CHUNK_SIZE_Z; ++r)
 		{

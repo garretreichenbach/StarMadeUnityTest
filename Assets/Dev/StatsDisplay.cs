@@ -1,9 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using Unity.VisualScripting;
 using UnityEditor;
 using UnityEngine;
+using Universe.World;
 
 namespace Dev {
 
@@ -12,6 +12,9 @@ namespace Dev {
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
 			EditorGUILayout.TextArea((target as StatsDisplay)?.stats ?? "", GUILayout.Height(200));
+			if(GUILayout.Button("Display Entity Debug Info")) {
+				EntityDatabaseManager.Instance.DrawDebugInfo = !(EntityDatabaseManager.Instance.DrawDebugInfo);
+			}
 		}
 	}
 

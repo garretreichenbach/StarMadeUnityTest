@@ -12,6 +12,14 @@ namespace Settings {
 		[Tooltip("Size of each sector in the world.")]
 		public IntSettingsValue SectorSize = new IntSettingsValue("Sector Size", "Size of each sector in the world.", 50000, 1000, 100000);
 
+		[InspectorLabel("System Size")]
+		[Tooltip("Size of each system in sectors.")]
+		public IntSettingsValue SystemSize = new IntSettingsValue("System Size", "Size of each system in sectors.", 16, 4, 64);
+
+		[InspectorLabel("Galaxy Radius")]
+		[Tooltip("Radius of the Galaxy in systems.")]
+		public IntSettingsValue GalaxyRadius = new IntSettingsValue("Galaxy Radius", "Radius of the Galaxy in systems.", 256, 100, 1000);
+
 		public static ServerSettings Instance { get; private set; }
 
 		void Start() {

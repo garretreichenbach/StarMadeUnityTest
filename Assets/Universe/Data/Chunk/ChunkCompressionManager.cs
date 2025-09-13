@@ -177,6 +177,8 @@ namespace Universe.Data.Chunk {
 				header.CompressedSize = compressedSize;
 				header.IsDirty = false;
 				MemoryManager._headers[chunkID] = header;
+			} else {
+				throw new Exception($"Chunk header not found for {chunkID}");
 			}
 
 			// Free uncompressed slot
@@ -243,19 +245,28 @@ namespace Universe.Data.Chunk {
 			decompressionShader.SetBuffer(kernel, ChunkMetadata, gpuMetadataBuffer);
 			decompressionShader.Dispatch(kernel, 32, 32, 1);
 
-			// Read back decompressed data
+			// Read back decompressed data with timeout
 			AsyncGPUReadbackRequest readback = AsyncGPUReadback.Request(gpuOutputBuffer);
+			float startTime = Time.realtimeSinceStartup;
+			float timeout = 5.0f; // 5 seconds max for GPU readback
 			while(!readback.done) {
 				if(readback.hasError) {
+					Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID}");
 					throw new Exception("GPU readback error (decompression)");
+				}
+				if(Time.realtimeSinceStartup - startTime > timeout) {
+					Debug.LogError($"[DecompressChunk] GPU readback timed out for chunk {chunkID}");
+					throw new Exception("GPU readback timed out");
 				}
 				await Task.Yield();
 			}
 			if(readback.hasError) {
+				Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID} (after done)");
 				throw new Exception("GPU readback error (decompression)");
 			}
 			int[] decompressedInts = readback.GetData<int>().ToArray();
 			if(decompressedInts.Length != 32 * 32 * 32) {
+				Debug.LogError($"[DecompressChunk] Decompressed data size mismatch: {decompressedInts.Length} for chunk {chunkID}");
 				throw new Exception($"Decompressed data size mismatch: {decompressedInts.Length}");
 			}
 

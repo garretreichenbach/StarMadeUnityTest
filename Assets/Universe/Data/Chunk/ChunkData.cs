@@ -38,7 +38,10 @@ namespace Universe.Data.Chunk {
 		public long _chunkID;
 		public long _seed;
 
-		public ChunkData(long chunkID = 0, long seed = 0) {
+		public static readonly long InvalidChunkID = -1;
+		public bool IsValid => _chunkID != InvalidChunkID;
+
+		public ChunkData(long chunkID = -1, long seed = 0) {
 			_chunkID = chunkID;
 			_seed = seed;
 		}
