@@ -21,12 +21,27 @@ namespace Universe.Data.Chunk {
 		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
 
 		public static ChunkBuildResult BuildChunk(IChunkData chunk) {
+			if(chunk == null) {
+				Debug.LogError("[ChunkBuilder] BuildChunk called with null chunk!");
+				return new ChunkBuildResult { mesh = new Mesh(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+			}
+			if(chunk is ChunkData cd && !cd.IsValid) {
+				Debug.LogError($"[ChunkBuilder] BuildChunk called with invalid ChunkData (chunkID={cd._chunkID})");
+				return new ChunkBuildResult { mesh = new Mesh(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+			}
+
 			var facePositions = new List<float3>();
 			var faceDirs = new List<byte>();
 			var faceSizes = new List<int2>();
 
 			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
 			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes);
+
+			Debug.Log($"[ChunkBuilder] BuildChunk: chunk valid, blockCount={blockCount}, faces={facePositions.Count}");
+
+			if(blockCount == 0) {
+				Debug.LogWarning("[ChunkBuilder] BuildChunk: No blocks found in chunk.");
+			}
 
 			int totalFaces = facePositions.Count;
 			if(totalFaces == 0) {

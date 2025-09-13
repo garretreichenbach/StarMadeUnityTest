@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -66,107 +67,126 @@ namespace Universe.Data.Chunk {
 			GpuMetadataBuffer.SetData(zeroMeta);
 
 			// Dispatch compression compute shader
-			int kernel = CompressionShader.FindKernel("CSMain");
-			CompressionShader.SetBuffer(kernel, ChunkInput, GpuInputBuffer);
-			CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, GpuOutputBuffer);
-			CompressionShader.SetBuffer(kernel, ChunkMetadata, GpuMetadataBuffer);
-			CompressionShader.Dispatch(kernel, 32, 32, 1);
+			const int MAX_COMPRESS_RETRIES = 3;
+			int attempt = 0;
+			int compressedPayloadSize = 0;
+			int totalCompressedBytes = 0;
+			int[] compressedInts = null;
+			byte[] compressedData = null;
+			bool valid = false;
+			while(attempt < MAX_COMPRESS_RETRIES && !valid) {
+				attempt++;
+				int kernel = CompressionShader.FindKernel("CSMain");
+				CompressionShader.SetBuffer(kernel, ChunkInput, GpuInputBuffer);
+				CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, GpuOutputBuffer);
+				CompressionShader.SetBuffer(kernel, ChunkMetadata, GpuMetadataBuffer);
+				CompressionShader.Dispatch(kernel, 1, 1, 1);
 
-			// Read back compressed data and metadata
-			AsyncGPUReadbackRequest metaRequest = AsyncGPUReadback.Request(GpuMetadataBuffer);
-			while(!metaRequest.done) {
+				// Read back metadata
+				AsyncGPUReadbackRequest metaRequest = AsyncGPUReadback.Request(GpuMetadataBuffer);
+				while(!metaRequest.done) {
+					if(metaRequest.hasError) break;
+					await Task.Yield();
+				}
 				if(metaRequest.hasError) {
-					throw new Exception("GPU readback error (metadata)");
+					if(attempt >= MAX_COMPRESS_RETRIES) throw new Exception("GPU readback error (metadata)");
+					continue;
 				}
-				await Task.Yield();
-			}
-			if(metaRequest.hasError) {
-				throw new Exception("GPU readback error (metadata)");
-			}
-			int[] meta = metaRequest.GetData<int>().ToArray();
-			// Only the first 4 values are valid for a single chunk
-			// Debug.Log($"[CompressChunk] chunkID={chunkID} meta array (first 4): [{meta[0]}, {meta[1]}, {meta[2]}, {meta[3]}]");
-			int compressedSize = meta[0];
-			// Log for debugging
-			// Debug.Log($"[CompressChunk] chunkID={chunkID} compressedSize={compressedSize} rawData.Length={rawData.Length}");
-			if(compressedSize <= 0 || compressedSize > rawData.Length * sizeof(int) * 2) {
-				Debug.LogError($"[CompressChunk] Invalid compressed size: {compressedSize} (chunkID={chunkID})");
-				throw new Exception($"Invalid compressed size: {compressedSize}");
-			}
-			// Hard cap: compressedSize must not exceed output buffer size in bytes
-			int outputBufferBytes = GpuOutputBuffer.count * sizeof(int);
-			if (compressedSize > outputBufferBytes) {
-				Debug.LogError($"[CompressChunk] compressedSize {compressedSize} exceeds output buffer size {outputBufferBytes} bytes (chunkID={chunkID})");
-				throw new Exception($"Compressed size exceeds output buffer size");
-			}
-			// Check alignment (optional, for debugging)
-			if (compressedSize % 4 != 0) {
-				Debug.LogWarning($"[CompressChunk] compressedSize {compressedSize} is not a multiple of 4 (chunkID={chunkID})");
-			}
+				int[] meta = metaRequest.GetData<int>().ToArray();
+				// Defensive: validate metadata length
+				if(meta == null || meta.Length == 0) {
+					if(attempt >= MAX_COMPRESS_RETRIES) throw new Exception("GPU metadata readback returned empty data");
+					continue;
+				}
+				compressedPayloadSize = meta[0];
+				int offsetTableBytes = 32 * 32 * 4;
+				// Validate payload size
+				if(compressedPayloadSize < 0) {
+					Debug.LogWarning($"[CompressChunk] Invalid compressedPayloadSize={compressedPayloadSize} on attempt {attempt}, retrying");
+					if(attempt >= MAX_COMPRESS_RETRIES) throw new Exception($"Invalid compressed payload size from GPU: {compressedPayloadSize}");
+					continue;
+				}
+				totalCompressedBytes = checked(compressedPayloadSize + offsetTableBytes);
 
-			// Compute element count for int buffer
-			int elementCount = (compressedSize + 3) / 4; // Round up to cover all bytes
-			// Debug.Log($"[CompressChunk] chunkID={chunkID} elementCount={elementCount} GpuOutputBuffer.count={GpuOutputBuffer.count}");
-			if(elementCount <= 0) {
-				Debug.LogError($"[CompressChunk] Invalid element count for GPU readback: {elementCount} (compressedSize={compressedSize}, chunkID={chunkID})");
-				throw new Exception($"Invalid element count for GPU readback: {elementCount} (compressedSize={compressedSize})");
-			}
-			if(elementCount > GpuOutputBuffer.count) {
-				Debug.LogError($"[CompressChunk] Element count {elementCount} exceeds GpuOutputBuffer.count {GpuOutputBuffer.count} (chunkID={chunkID})");
-				throw new Exception($"Element count {elementCount} exceeds GpuOutputBuffer.count {GpuOutputBuffer.count}");
-			}
-			// Defensive logging before readback
-			// Debug.Log($"[CompressChunk] About to request GPU readback: offset=0, elementCount={elementCount}, bufferCount={GpuOutputBuffer.count}");
-			if(elementCount > GpuOutputBuffer.count) {
-				Debug.LogError($"[CompressChunk] elementCount exceeds buffer count before readback! chunkID={chunkID}");
-				throw new Exception("elementCount exceeds buffer count");
-			}
-
-			// Use the simpler overload to avoid Unity's offset/size bug
-			AsyncGPUReadbackRequest dataRequest = AsyncGPUReadback.Request(GpuOutputBuffer);
-			// Debug.Log($"[CompressChunk] Requested GPU readback (simple overload): done={dataRequest.done}, hasError={dataRequest.hasError}, layerCount={dataRequest.layerCount}, width={dataRequest.width}, height={dataRequest.height}");
-			while(!dataRequest.done) {
+				// Read back output buffer
+				AsyncGPUReadbackRequest dataRequest = AsyncGPUReadback.Request(GpuOutputBuffer);
+				while(!dataRequest.done) {
+					if(dataRequest.hasError) break;
+					await Task.Yield();
+				}
 				if(dataRequest.hasError) {
-					throw new Exception("GPU readback error (data)");
+					if(attempt >= MAX_COMPRESS_RETRIES) throw new Exception("GPU readback error (data)");
+					continue;
 				}
-				await Task.Yield();
+				compressedInts = dataRequest.GetData<int>().ToArray();
+				// Defensive: ensure we have enough bytes in the readback to cover totalCompressedBytes
+				int availableBytes = compressedInts.Length * sizeof(int);
+				if(totalCompressedBytes > availableBytes) {
+					Debug.LogWarning($"[CompressChunk] Readback availableBytes={availableBytes} less than expected totalCompressedBytes={totalCompressedBytes} on attempt {attempt}");
+					if(attempt >= MAX_COMPRESS_RETRIES) throw new Exception($"Readback returned fewer bytes ({availableBytes}) than expected ({totalCompressedBytes})");
+					continue;
+				}
+				if (compressedInts.Length > (totalCompressedBytes + 3) / 4) Array.Resize(ref compressedInts, (totalCompressedBytes + 3) / 4);
+				compressedData = new byte[totalCompressedBytes];
+				Buffer.BlockCopy(compressedInts, 0, compressedData, 0, totalCompressedBytes);
+
+				// Validate offset table inside compressedData
+				try {
+					int columnCount = 32 * 32;
+					int payloadSizeCheck = compressedData.Length - offsetTableBytes;
+					uint prev = 0;
+					for(int i = 0; i < columnCount; ++i) {
+						uint off = BitConverter.ToUInt32(compressedData, i * 4);
+						if(off > payloadSizeCheck) throw new Exception($"Invalid offset[{i}]={off} > payloadSize={payloadSizeCheck}");
+						if(i > 0 && off < prev) throw new Exception($"Offset table not monotonic at i={i}: prev={prev} cur={off}");
+						prev = off;
+					}
+					valid = true;
+				} catch(Exception ex) {
+					Debug.LogWarning($"[CompressChunk] Validation failed on attempt {attempt}: {ex.Message}");
+					valid = false;
+					// loop will retry
+				}
 			}
-			if(dataRequest.hasError) {
-				throw new Exception("GPU readback error (data)");
+			if(!valid) {
+				throw new Exception($"Compression produced invalid offset table after {MAX_COMPRESS_RETRIES} attempts");
 			}
-			int[] compressedInts = dataRequest.GetData<int>().ToArray();
-			if (compressedInts.Length < elementCount) {
-				throw new Exception($"Readback returned fewer elements than expected: {compressedInts.Length} < {elementCount}");
-			}
-			// Only use the first elementCount elements
-			if (compressedInts.Length > elementCount) {
-				Array.Resize(ref compressedInts, elementCount);
-			}
-			// Log first 16 bytes of output buffer for debugging
-			string firstBytes = string.Join(", ", compressedInts.Length > 4 ? new ArraySegment<int>(compressedInts, 0, 4) : compressedInts);
-			// Debug.Log($"[CompressChunk] chunkID={chunkID} first 16 bytes of output buffer: [{firstBytes}]");
-			// Convert int[] to byte[]
-			byte[] compressedData = new byte[compressedSize];
-			Buffer.BlockCopy(compressedInts, 0, compressedData, 0, compressedSize);
 
 			// Allocate space in compressed pool and update memory manager
-			int offset = MemoryManager._compressedPoolHead;
-			if(offset + compressedSize > MemoryManager._compressedPool.Length) {
+			// Reserve space atomically in the compressed pool (safe even if accessed elsewhere)
+			int offset;
+			int newHead = Interlocked.Add(ref MemoryManager._compressedPoolHead, totalCompressedBytes);
+			offset = newHead - totalCompressedBytes;
+			// Defensive checks
+			if(offset < 0) {
+				Debug.LogWarning($"[CompressChunk] Compressed pool head negative ({MemoryManager._compressedPoolHead - totalCompressedBytes}), clamping to 0");
+				offset = 0;
+				Interlocked.Exchange(ref MemoryManager._compressedPoolHead, totalCompressedBytes);
+			}
+			if(offset + totalCompressedBytes > MemoryManager._compressedPool.Length) {
+				// Roll back reservation
+				Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
 				throw new Exception("Compressed pool out of memory");
 			}
-			// Copy to compressed pool
+			// Copy to compressed pool with try/catch to provide clearer errors
 			var pool = MemoryManager._compressedPool;
-			for(int i = 0; i < compressedSize; i++) {
-				pool[offset + i] = compressedData[i];
+			try {
+				for(int i = 0; i < totalCompressedBytes; i++) {
+					pool[offset + i] = compressedData[i];
+				}
+			} catch(Exception ex) {
+				// Roll back reservation on failure
+				Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
+				Debug.LogError($"[CompressChunk] Failed copying compressed data into pool at offset={offset}, len={totalCompressedBytes}: {ex.Message}");
+				throw;
 			}
-			MemoryManager._compressedPoolHead += compressedSize;
 
 			// Update allocation and header
 			if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
 				throw new Exception($"Chunk allocation not found for {chunkID}");
 			}
 			alloc.CompressedOffset = offset;
-			alloc.CompressedSize = compressedSize;
+			alloc.CompressedSize = totalCompressedBytes;
 			alloc.State = ChunkMemoryManager.ChunkState.Compressed;
 			int oldPoolIndex = alloc.PoolIndex;
 			alloc.PoolIndex = -1;
@@ -174,7 +194,7 @@ namespace Universe.Data.Chunk {
 
 			if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
 				header.State = ChunkMemoryManager.ChunkState.Compressed;
-				header.CompressedSize = compressedSize;
+				header.CompressedSize = totalCompressedBytes;
 				header.IsDirty = false;
 				MemoryManager._headers[chunkID] = header;
 			} else {
@@ -189,7 +209,7 @@ namespace Universe.Data.Chunk {
 			return new ChunkMemoryManager.CompressedChunk {
 				ChunkID = chunkID,
 				Offset = offset,
-				Size = compressedSize,
+				Size = totalCompressedBytes,
 			};
 		}
 
@@ -225,7 +245,8 @@ namespace Universe.Data.Chunk {
 				compressedData[i] = pool[compressedOffset + i];
 			}
 			// Upload to GPU
-			using ComputeBuffer gpuCompressedBuffer = new ComputeBuffer((compressedSize + 3) / 4, sizeof(int));
+			// Use a raw (byte-addressable) buffer because the decompressor expects a ByteAddressBuffer
+			using ComputeBuffer gpuCompressedBuffer = new ComputeBuffer((compressedSize + 3) / 4, sizeof(int), ComputeBufferType.Raw);
 			int[] compressedInts = new int[(compressedSize + 3) / 4];
 			Buffer.BlockCopy(compressedData, 0, compressedInts, 0, compressedSize);
 			gpuCompressedBuffer.SetData(compressedInts);
@@ -234,7 +255,11 @@ namespace Universe.Data.Chunk {
 			using ComputeBuffer gpuOutputBuffer = new ComputeBuffer(32 * 32 * 32, sizeof(int));
 			// Prepare metadata buffer
 			using ComputeBuffer gpuMetadataBuffer = new ComputeBuffer(2, sizeof(uint));
-			uint[] meta = { (uint)compressedSize, (uint)originalSize };
+			int offsetTableBytes = 32 * 32 * 4; // COLUMN_COUNT * 4
+			if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
+			int payloadSize = (compressedSize - offsetTableBytes);
+			// ChunkMetadata[0] expects the payload size (bytes after offset table)
+			uint[] meta = { (uint)payloadSize, (uint)originalSize };
 			gpuMetadataBuffer.SetData(meta);
 
 			// Dispatch decompression compute shader
@@ -243,7 +268,8 @@ namespace Universe.Data.Chunk {
 			decompressionShader.SetBuffer(kernel, CompressedInput, gpuCompressedBuffer);
 			decompressionShader.SetBuffer(kernel, ChunkOutput, gpuOutputBuffer);
 			decompressionShader.SetBuffer(kernel, ChunkMetadata, gpuMetadataBuffer);
-			decompressionShader.Dispatch(kernel, 32, 32, 1);
+			// See note above: use a single group so the shader runs 32x32 threads as intended.
+			decompressionShader.Dispatch(kernel, 1, 1, 1);
 
 			// Read back decompressed data with timeout
 			AsyncGPUReadbackRequest readback = AsyncGPUReadback.Request(gpuOutputBuffer);
@@ -270,6 +296,69 @@ namespace Universe.Data.Chunk {
 				throw new Exception($"Decompressed data size mismatch: {decompressedInts.Length}");
 			}
 
+			// CPU-side validation: decompress compressedData on CPU and compare to GPU result
+			int offsetTableBytes_check = 32 * 32 * 4;
+			Debug.Log($"[DecompressChunk] Debug: compressedSize={compressedSize}, compressedData.Length={compressedData.Length}, offsetTableBytes={offsetTableBytes_check}");
+			if(compressedData.Length < offsetTableBytes_check) {
+				Debug.LogError($"[DecompressChunk] Compressed data is smaller than offset table: {compressedData.Length} < {offsetTableBytes_check}");
+				throw new Exception("Compressed data too small for offset table");
+			}
+			// Validate offset table entries first
+			int columnCount = 32 * 32;
+			payloadSize = compressedData.Length - offsetTableBytes_check;
+			uint[] offsets = new uint[columnCount];
+			for(int i = 0; i < columnCount; ++i) {
+				int idx = i * 4;
+				if(idx + 4 <= compressedData.Length) offsets[i] = BitConverter.ToUInt32(compressedData, idx);
+				else offsets[i] = (uint)payloadSize; // defensive
+			}
+			// Check monotonicity and bounds; be tolerant and clamp small errors instead of failing hard
+			for(int i = 0; i < columnCount; ++i) {
+				uint o = offsets[i];
+				if(o > payloadSize) {
+					// If offset is only slightly past the payload (e.g. by alignment), clamp and warn
+					Debug.LogWarning($"[DecompressChunk] Offset[{i}]={o} > payloadSize={payloadSize}, clamping to payloadSize");
+					offsets[i] = (uint)payloadSize;
+					o = offsets[i];
+				}
+				if(i > 0 && offsets[i] < offsets[i-1]) {
+					// Fix minor non-monotonicity by forcing non-decreasing offsets; log for diagnosis
+					Debug.LogWarning($"[DecompressChunk] Offset table not monotonic at i={i}: prev={offsets[i-1]} cur={offsets[i]}, fixing by setting to prev");
+					offsets[i] = offsets[i-1];
+				}
+			}
+			// Dump a small sample of offsets for debugging
+			string offsDump = "";
+			for(int i = 0; i < Math.Min(16, columnCount); ++i) offsDump += offsets[i].ToString() + " ";
+			Debug.Log($"[DecompressChunk] offsetTable sample (first 16): {offsDump}");
+
+			try {
+				int[] cpuDecompressed = CPUDecompress(compressedData);
+				if(cpuDecompressed.Length != decompressedInts.Length) {
+					Debug.LogError($"[DecompressChunk] CPU decompressed length mismatch: {cpuDecompressed.Length} vs GPU {decompressedInts.Length}");
+				} else {
+					for(int i = 0; i < decompressedInts.Length; i++) {
+						if(decompressedInts[i] != cpuDecompressed[i]) {
+							int idx = i;
+							int columnIndex = idx / 32;
+							int z = idx % 32;
+							int x = columnIndex % 32;
+							int y = columnIndex / 32;
+							Debug.LogError($"[DecompressChunk] GPU vs CPU mismatch at index {idx} (x={x},y={y},z={z}): gpu={decompressedInts[i]}, cpu={cpuDecompressed[i]}");
+							// Dump offsets for this column
+							offsetTableBytes = 32 * 32 * 4;
+							uint colOffset = BitConverter.ToUInt32(compressedData, columnIndex * 4);
+							uint nextOffset = (columnIndex < 32 * 32 - 1) ? BitConverter.ToUInt32(compressedData, (columnIndex + 1) * 4) : (uint)(compressedData.Length - offsetTableBytes);
+							Debug.LogError($"[DecompressChunk] columnIndex={columnIndex} colOffset={colOffset} nextOffset={nextOffset} payloadSize={(compressedData.Length - offsetTableBytes)} totalCompressed={compressedData.Length}");
+							throw new Exception("GPU vs CPU decompressed mismatch detected (see logs)");
+						}
+					}
+				}
+			} catch(Exception ex) {
+				Debug.LogError($"[DecompressChunk] CPU validation exception: {ex.Message}");
+				throw;
+			}
+
 			// Write to uncompressed pool
 			int startIndex = poolIndex * 32 * 32 * 32;
 			var uncompressedPool = MemoryManager._uncompressedPool;
@@ -291,6 +380,40 @@ namespace Universe.Data.Chunk {
 
 			// Free compressed slot (handled by MemoryManager if needed)
 			return header;
+		}
+
+		int[] CPUDecompress(byte[] compressedStream) {
+			int COLUMN_COUNT = 32 * 32;
+			int CHUNK_SIZE_Z = 32;
+			int offsetTableBytes = COLUMN_COUNT * 4;
+			int payloadSize = compressedStream.Length - offsetTableBytes;
+			int[] outArr = new int[COLUMN_COUNT * CHUNK_SIZE_Z];
+			for(int col = 0; col < COLUMN_COUNT; col++) {
+				int offsetIndex = col * 4;
+				if(offsetIndex + 4 > compressedStream.Length) {
+					throw new IndexOutOfRangeException($"Offset table read out of range: offsetIndex={offsetIndex}, compressedStream.Length={compressedStream.Length}");
+				}
+				uint colOffset = BitConverter.ToUInt32(compressedStream, offsetIndex);
+				uint nextOffset = (col < COLUMN_COUNT - 1) ? BitConverter.ToUInt32(compressedStream, (col + 1) * 4) : (uint)payloadSize;
+				int readPtr = offsetTableBytes + (int)colOffset;
+				int endPtr = offsetTableBytes + (int)nextOffset;
+				int outBase = col * CHUNK_SIZE_Z;
+				int outIdx = 0;
+				while(readPtr + 8 <= endPtr && outIdx < CHUNK_SIZE_Z) {
+					if(readPtr + 8 > compressedStream.Length) {
+						throw new IndexOutOfRangeException($"Compressed payload read out of range: readPtr={readPtr}, needed=8, length={compressedStream.Length}");
+					}
+					int value = BitConverter.ToInt32(compressedStream, readPtr);
+					uint runLength = BitConverter.ToUInt32(compressedStream, readPtr + 4);
+					readPtr += 8;
+					for(uint r = 0; r < runLength && outIdx < CHUNK_SIZE_Z; ++r) {
+						outArr[outBase + outIdx] = value;
+						outIdx++;
+					}
+				}
+				for(; outIdx < CHUNK_SIZE_Z; ++outIdx) outArr[outBase + outIdx] = 0;
+			}
+			return outArr;
 		}
 	}
 }

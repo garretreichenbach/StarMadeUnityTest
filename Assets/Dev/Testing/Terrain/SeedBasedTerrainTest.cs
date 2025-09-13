@@ -67,12 +67,12 @@ namespace Dev.Testing.Terrain {
 			// Build the mesh
 			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
 			if(chunkGenQueue != null) {
+				entity.Loaded = true;
 				chunkGenQueue.RequestMeshRebuild(entity);
 			} else {
 				Debug.LogWarning("ChunkGenerationQueue not found - triggering immediate mesh rebuild");
-				entity.RebuildMesh();
+				entity.RequestMeshRebuild();
 			}
-			PrintMemoryStatistics("After generating first asteroid");
 		}
 
 		void GenerateChunksWithGlobalMemory(GameEntity entity) {
@@ -87,12 +87,6 @@ namespace Dev.Testing.Terrain {
 
 				// Generate a unique chunk ID - include entity ID to avoid collisions
 				long chunkID = GenerateChunkID(entity.EntityID, i);
-
-				// Allocate chunk in global memory system
-				if(!ChunkMemoryManager.Instance.AllocateChunk(chunkID, entity.EntityID, i)) {
-					Debug.LogError($"Failed to allocate chunk {chunkID} in global memory!");
-					continue;
-				}
 
 				// Create ChunkData that references the global memory
 				ChunkData chunkData = new ChunkData(chunkID);
@@ -185,13 +179,6 @@ namespace Dev.Testing.Terrain {
 				int bi = neighborChunk.GetBlockIndex(new Vector3(lx, ly, lz));
 				return neighborChunk.GetBlockType(bi);
 			};
-		}
-
-		void PrintMemoryStatistics(string context) {
-			if(ChunkMemoryManager.Instance != null) {
-				ChunkMemoryManager.Instance.GetMemoryStatistics(out int uncompressed, out int compressed, out long totalMemory);
-				Debug.Log($"[{context}] Memory Stats - Uncompressed: {uncompressed}, Compressed: {compressed}, Total: {totalMemory / 1024 / 1024}MB");
-			}
 		}
 
 		void Update() {

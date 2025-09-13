@@ -13,7 +13,7 @@ namespace Universe.Data.GameEntity {
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
 			if(GUILayout.Button("Rebuild Mesh")) {
-				(target as GameEntity)?.RebuildMesh();
+				(target as GameEntity)?.RequestMeshRebuild();
 			}
 			if(GUILayout.Button("Load Chunk Data")) {
 				EntityDatabaseManager.Instance.LoadEntity(((GameEntity)target).UID, true);
@@ -89,6 +89,10 @@ namespace Universe.Data.GameEntity {
 		public GameEntityData Data;
 		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
+		bool _initialized;
+		MeshFilter _meshFilter;
+		MeshRenderer _meshRenderer;
+
 		void OnGUI() {
 			if(!DrawDebugInfo) return;
 			string debugText;
@@ -111,8 +115,9 @@ namespace Universe.Data.GameEntity {
 				return false;
 			}
 			_ = await ChunkMemoryManager.Instance.DecompressEntity(this, rawCompressedData);
+			// Do NOT call AllocateChunks here; decompression already fills Chunks array
 			Loaded = true;
-			RebuildMesh();
+			RequestMeshRebuild();
 			return true;
 		}
 
@@ -137,22 +142,51 @@ namespace Universe.Data.GameEntity {
 			return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
 		}
 
+		void Initialize() {
+			_meshFilter = gameObject.GetComponent<MeshFilter>();
+			if(_meshFilter == null) {
+				_meshFilter = gameObject.AddComponent<MeshFilter>();
+			}
+			_meshRenderer = gameObject.GetComponent<MeshRenderer>();
+			if(_meshRenderer == null) {
+				_meshRenderer = gameObject.AddComponent<MeshRenderer>();
+			}
+			_initialized = true;
+		}
+
 		public void RebuildMesh() {
-			MeshRenderer meshRenderer = GetComponent<MeshRenderer>();
-			MeshFilter meshFilter = GetComponent<MeshFilter>();
+			if(!_initialized) {
+				Initialize();
+			}
 			blockCount = 0;
 			triangleCount = 0;
 			vertexCount = 0;
 			if(!Loaded) {
-				meshFilter.mesh.Clear();
-				meshFilter.mesh.RecalculateBounds();
+				_meshFilter.mesh.Clear();
+				_meshFilter.mesh.RecalculateBounds();
 				return;
 			}
-
-			var combine = new CombineInstance[Chunks.Length];
-			for(int i = 0; i < Chunks.Length; i++) {
+			if(Chunks == null || Chunks.Length == 0) {
+				AllocateChunks(ChunkDimensions);
+			}
+			if(Data.ChunkCount == 0 || Chunks == null || Chunks.Length == 0) {
+				Debug.LogError($"[GameEntity] RebuildMesh: Entity {UID} is empty!");
+				return;
+			}
+			var combine = new CombineInstance[Data.ChunkCount];
+			for(int i = 0; i < Data.ChunkCount; i++) {
+				var chunk = GetChunkData(i);
+				if(chunk == null) {
+					Debug.LogError($"[GameEntity] RebuildMesh: Chunk {i} is null!");
+					continue;
+				}
+				if(chunk is ChunkData cd && !cd.IsValid) {
+					Debug.LogError($"[GameEntity] RebuildMesh: Chunk {i} is invalid (chunkID={cd._chunkID})!");
+					continue;
+				}
 				Vector3 chunkPos = GetChunkPosition(i);
-				ChunkBuildResult result = ChunkBuilder.BuildChunk(GetChunkData(i));
+				Debug.Log($"[GameEntity] RebuildMesh: Building chunk {i} (chunkID={(chunk is ChunkData cdx ? cdx._chunkID.ToString() : "?")})");
+				ChunkBuildResult result = ChunkBuilder.BuildChunk(chunk);
 				combine[i].mesh = result.mesh;
 				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);
 				blockCount += result.blockCount;
@@ -160,28 +194,16 @@ namespace Universe.Data.GameEntity {
 				vertexCount += result.vertexCount;
 			}
 
-			if(meshFilter == null) {
-				meshFilter = gameObject.AddComponent<MeshFilter>();
-			}
-
-			if(meshRenderer == null) {
-				meshRenderer = gameObject.AddComponent<MeshRenderer>();
-				meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
-			}
-
+			_meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
 			Mesh mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
-			meshFilter.mesh = mesh;
-			RequestMeshRebuild();
+			_meshFilter.mesh = mesh;
 		}
 
 		public void RequestMeshRebuild() {
 			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
 			if(chunkGenQueue != null) {
 				chunkGenQueue.RequestMeshRebuild(this);
-			} else {
-				Debug.LogWarning("ChunkGenerationQueue not found - triggering immediate mesh rebuild");
-				RebuildMesh();
 			}
 		}
 
@@ -191,22 +213,47 @@ namespace Universe.Data.GameEntity {
 			Chunks = new ChunkData[chunksTotal];
 			ChunkCount = chunksTotal;
 			Loaded = true;
+
+			for(int i = 0; i < chunksTotal; i++) {
+				// Generate a unique chunkID for each chunk (entityID shifted left, plus index)
+				long chunkID = ((long)EntityID << 32) | (uint)i;
+				// Only allocate if not already present in memory manager
+				if (!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
+					ChunkMemoryManager.Instance.AllocateChunk(chunkID, EntityID, i);
+					Chunks[i] = new ChunkData(chunkID, ChunkMemoryManager.Instance._allocations[chunkID].PoolIndex);
+					// Optionally fill with default data if needed (for new entities only)
+					// int[] data = new int[32 * 32 * 32];
+					// for(int j = 0; j < data.Length; j++) data[j] = 1;
+					// ChunkMemoryManager.Instance.SetRawDataArray(chunkID, data);
+				}
+			}
 		}
 
 		[Serializable]
 		public struct GameEntityData {
 			[PrimaryKey]
 			public string UID { get; set; }
+
 			public GameEntityType EntityType { get; set; }
+
 			public int EntityID { get; set; }
+
 			public string EntityName { get; set; }
+
 			public int FactionID { get; set; }
+
 			public int SectorID { get; set; }
+
 			public bool ChunkLoaded { get; set; }
+
 			public int ChunkCount { get; set; }
+
 			public int ChunkDimensionsX { get; set; }
+
 			public int ChunkDimensionsY { get; set; }
+
 			public int ChunkDimensionsZ { get; set; }
+
 			[Ignore]
 			public int[] ChunkDimensions {
 				get => new int[] { ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ };
