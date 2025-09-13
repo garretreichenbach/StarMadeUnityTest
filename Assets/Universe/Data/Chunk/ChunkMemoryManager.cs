@@ -378,8 +378,8 @@ namespace Universe.Data.Chunk {
 		#region Compression Management
 
 		/**
-		 * Ensures the specified chunk is accessible for reading/writing. If the chunk is compressed, it will be decompressed asynchronously.
-		 */
+		* Ensures the specified chunk is accessible for reading/writing. If the chunk is compressed, it will be decompressed asynchronously.
+		*/
 		public async Task<bool> EnsureChunkAccessible(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				Debug.LogError($"Chunk {chunkID} not allocated!");
@@ -403,7 +403,7 @@ namespace Universe.Data.Chunk {
 			if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
 				Debug.LogWarning($"Chunk {chunkID} is being processed, waiting for access (async)");
 				// Wait asynchronously for the operation to complete
-				if (_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) {
+				if(_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) {
 					try {
 						return await op.CompletionSource.Task;
 					} catch {
@@ -519,9 +519,7 @@ namespace Universe.Data.Chunk {
 
 			foreach(var kvp in _headers) {
 				ChunkHeader header = kvp.Value;
-				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) &&
-					allocation.State == ChunkState.Uncompressed &&
-					header.LastAccessTime < oldestTime && Time.time - header.LastAccessTime > 30.0f) { // 30 second threshold
+				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) && allocation.State == ChunkState.Uncompressed && header.LastAccessTime < oldestTime && Time.time - header.LastAccessTime > 30.0f) { // 30 second threshold
 					oldestTime = header.LastAccessTime;
 					oldestChunkID = kvp.Key;
 				}
@@ -537,12 +535,83 @@ namespace Universe.Data.Chunk {
 		}
 
 		/**
-		 * Compresses all chunks belonging to the specified entity and returns the compressed data as a byte array so it can be written to disk.
-		 */
+		* Decompresses an entity's chunk data from a byte array.
+		*/
+		public async Task<bool> DecompressEntity(GameEntity.GameEntity gameEntity, byte[] rawCompressedData) {
+			var entityData = new System.IO.MemoryStream(rawCompressedData);
+			var decompressionTasks = new List<Task<bool>>();
+			int chunksTotal = gameEntity.ChunkCount;
+			int chunksRead = 0;
+			int chunksFailed = 0;
+
+			while(entityData.Position < entityData.Length && chunksRead < chunksTotal) {
+				// Read chunk ID
+				byte[] chunkIDBytes = new byte[sizeof(long)];
+				entityData.Read(chunkIDBytes, 0, sizeof(long));
+				long chunkID = BitConverter.ToInt64(chunkIDBytes, 0);
+
+				// Read compressed size
+				byte[] sizeBytes = new byte[sizeof(int)];
+				entityData.Read(sizeBytes, 0, sizeof(int));
+				int compressedSize = BitConverter.ToInt32(sizeBytes, 0);
+
+				// Read compressed data
+				byte[] compressedData = new byte[compressedSize];
+				entityData.Read(compressedData, 0, compressedSize);
+
+				chunksRead++;
+
+				// Allocate chunk if not already allocated
+				if(!_allocations.ContainsKey(chunkID)) {
+					if(!AllocateChunk(chunkID, gameEntity.EntityID, chunksRead - 1)) {
+						Debug.LogError($"Failed to allocate chunk {chunkID} for entity {gameEntity.Name}");
+						chunksFailed++;
+						continue;
+					}
+				}
+
+				if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+					Debug.LogError($"Chunk {chunkID} allocation missing after allocation");
+					chunksFailed++;
+					continue;
+				}
+
+				if(allocation.State == ChunkState.Uncompressed) {
+					// Already uncompressed, skip
+					continue;
+				}
+
+				// Decompress chunk
+				decompressionTasks.Add(DecompressChunk(chunkID));
+				await Task.WhenAll(decompressionTasks);
+				decompressionTasks.Clear();
+
+				// Check if we need to start compression of an uncompressed chunk
+				if(TryFreeUncompressedSlot()) {
+					// Wait for compression to complete
+					await Task.Delay(100);
+				}
+
+				// Wait for all decompression tasks to complete
+				await Task.Delay(100);
+				await Task.WhenAll(decompressionTasks);
+				decompressionTasks.Clear();
+			}
+
+			if(chunksFailed > 0) {
+				Debug.LogError($"Decompression completed with {chunksFailed} failed chunks for entity {gameEntity.Name}");
+			}
+
+			// Return true if all chunks were read and decompressed successfully
+			return chunksRead == chunksTotal;
+		}
+
+		/**
+		* Compresses all chunks belonging to the specified entity and returns the compressed data as a byte array so it can be written to disk.
+		*/
 		public async Task<byte[]> CompressEntity(GameEntity.GameEntity entity) {
 			var entityData = new System.IO.MemoryStream();
 			var compressionTasks = new List<Task<bool>>();
-			var chunkIDsToCompress = new List<long>();
 
 			// First, start compression tasks for all uncompressed chunks
 			foreach(var chunk in entity.Chunks) {
@@ -553,7 +622,6 @@ namespace Universe.Data.Chunk {
 
 				if(allocation.State == ChunkState.Uncompressed) {
 					compressionTasks.Add(CompressChunk(chunk._chunkID));
-					chunkIDsToCompress.Add(chunk._chunkID);
 				}
 			}
 

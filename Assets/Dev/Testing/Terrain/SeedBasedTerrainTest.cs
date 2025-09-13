@@ -2,6 +2,7 @@ using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.GameEntity;
 using Universe.Data.Generation;
+using Universe.World;
 
 namespace Dev.Testing.Terrain {
 	public class GlobalMemoryTerrainTest : MonoBehaviour {
@@ -16,13 +17,15 @@ namespace Dev.Testing.Terrain {
 		[Header("Asteroid Settings")]
 		public AsteroidGenerationSettings asteroidSettings;
 
+		[Header("Test Controls")]
+		public bool generateTestAsteroid;
+
 		void Start() {
 			if(ChunkMemoryManager.Instance == null) {
 				Debug.LogError("GlobalChunkMemoryManager not found! Make sure it's in the scene.");
 				return;
 			}
 			asteroidSettings ??= AsteroidGenerationSettings.CreateDefault(chunkDimensions);
-			GenerateTestAsteroid();
 		}
 
 		/*void OnDestroy() {
@@ -39,13 +42,23 @@ namespace Dev.Testing.Terrain {
 
 		void GenerateTestAsteroid() {
 			Debug.Log("=== Generating Test Asteroid ===");
-			GameEntity entity = new GameObject("TestAsteroid").AddComponent<Asteroid>();
+			GameObject asteroidGo = new GameObject($"Entity_Asteroid_{System.Guid.NewGuid()}");
+			GameEntity entity = asteroidGo.AddComponent<GameEntity>();
+			entity.Data = new GameEntity.GameEntityData {
+				EntityID = GameEntity.IDCounter++,
+				EntityType = GameEntityType.Asteroid,
+				EntityName = "Test Asteroid",
+				FactionID = 0,
+				SectorID = 0,
+				ChunkLoaded = true,
+				UID = asteroidGo.name,
+			};
+			EntityDatabaseManager.Instance.InsertEntity(entity.Data);
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);
-			entity.chunkDimensions = chunkDimensions;
-			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
-			entity.AllocateChunks(chunksTotal);
+			entity.ChunkDimensions = chunkDimensions;
+			entity.AllocateChunks(chunkDimensions);
 			SetupCrossChunkResolver(entity);
 
 			// Generate chunks using the new global memory system
@@ -63,7 +76,7 @@ namespace Dev.Testing.Terrain {
 		}
 
 		void GenerateChunksWithGlobalMemory(GameEntity entity) {
-			int chunksTotal = entity.chunkCount;
+			int chunksTotal = entity.Chunks.Length;
 			Debug.Log($"Generating {chunksTotal} chunks using GlobalChunkMemoryManager");
 
 			// Generate all chunks using the global memory system
@@ -73,10 +86,10 @@ namespace Dev.Testing.Terrain {
 				int chunkZ = i / (chunkDimensions.x * chunkDimensions.y);
 
 				// Generate a unique chunk ID - include entity ID to avoid collisions
-				long chunkID = GenerateChunkID(entity.ID, i);
+				long chunkID = GenerateChunkID(entity.EntityID, i);
 
 				// Allocate chunk in global memory system
-				if(!ChunkMemoryManager.Instance.AllocateChunk(chunkID, entity.ID, i)) {
+				if(!ChunkMemoryManager.Instance.AllocateChunk(chunkID, entity.EntityID, i)) {
 					Debug.LogError($"Failed to allocate chunk {chunkID} in global memory!");
 					continue;
 				}
@@ -178,6 +191,13 @@ namespace Dev.Testing.Terrain {
 			if(ChunkMemoryManager.Instance != null) {
 				ChunkMemoryManager.Instance.GetMemoryStatistics(out int uncompressed, out int compressed, out long totalMemory);
 				Debug.Log($"[{context}] Memory Stats - Uncompressed: {uncompressed}, Compressed: {compressed}, Total: {totalMemory / 1024 / 1024}MB");
+			}
+		}
+
+		void Update() {
+			if(generateTestAsteroid) {
+				generateTestAsteroid = false;
+				GenerateTestAsteroid();
 			}
 		}
 	}

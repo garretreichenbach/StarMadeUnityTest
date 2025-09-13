@@ -1,9 +1,5 @@
 ﻿using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.Threading.Tasks;
-using LiteDB.Engine;
-using Unity.Entities;
 using UnityEngine;
 using UnityEngine.Rendering;
 using EngineSettings = Settings.EngineSettings;
@@ -89,10 +85,10 @@ namespace Universe.Data.Chunk {
 			}
 			int[] meta = metaRequest.GetData<int>().ToArray();
 			// Only the first 4 values are valid for a single chunk
-			Debug.Log($"[CompressChunk] chunkID={chunkID} meta array (first 4): [{meta[0]}, {meta[1]}, {meta[2]}, {meta[3]}]");
+			// Debug.Log($"[CompressChunk] chunkID={chunkID} meta array (first 4): [{meta[0]}, {meta[1]}, {meta[2]}, {meta[3]}]");
 			int compressedSize = meta[0];
 			// Log for debugging
-			Debug.Log($"[CompressChunk] chunkID={chunkID} compressedSize={compressedSize} rawData.Length={rawData.Length}");
+			// Debug.Log($"[CompressChunk] chunkID={chunkID} compressedSize={compressedSize} rawData.Length={rawData.Length}");
 			if(compressedSize <= 0 || compressedSize > rawData.Length * sizeof(int) * 2) {
 				Debug.LogError($"[CompressChunk] Invalid compressed size: {compressedSize} (chunkID={chunkID})");
 				throw new Exception($"Invalid compressed size: {compressedSize}");
@@ -110,7 +106,7 @@ namespace Universe.Data.Chunk {
 
 			// Compute element count for int buffer
 			int elementCount = (compressedSize + 3) / 4; // Round up to cover all bytes
-			Debug.Log($"[CompressChunk] chunkID={chunkID} elementCount={elementCount} GpuOutputBuffer.count={GpuOutputBuffer.count}");
+			// Debug.Log($"[CompressChunk] chunkID={chunkID} elementCount={elementCount} GpuOutputBuffer.count={GpuOutputBuffer.count}");
 			if(elementCount <= 0) {
 				Debug.LogError($"[CompressChunk] Invalid element count for GPU readback: {elementCount} (compressedSize={compressedSize}, chunkID={chunkID})");
 				throw new Exception($"Invalid element count for GPU readback: {elementCount} (compressedSize={compressedSize})");
@@ -120,11 +116,7 @@ namespace Universe.Data.Chunk {
 				throw new Exception($"Element count {elementCount} exceeds GpuOutputBuffer.count {GpuOutputBuffer.count}");
 			}
 			// Defensive logging before readback
-			Debug.Log($"[CompressChunk] About to request GPU readback: offset=0, elementCount={elementCount}, bufferCount={GpuOutputBuffer.count}");
-			if(elementCount <= 0) {
-				Debug.LogError($"[CompressChunk] elementCount is zero or negative before readback! chunkID={chunkID}");
-				throw new Exception("elementCount must be > 0");
-			}
+			// Debug.Log($"[CompressChunk] About to request GPU readback: offset=0, elementCount={elementCount}, bufferCount={GpuOutputBuffer.count}");
 			if(elementCount > GpuOutputBuffer.count) {
 				Debug.LogError($"[CompressChunk] elementCount exceeds buffer count before readback! chunkID={chunkID}");
 				throw new Exception("elementCount exceeds buffer count");
@@ -132,7 +124,7 @@ namespace Universe.Data.Chunk {
 
 			// Use the simpler overload to avoid Unity's offset/size bug
 			AsyncGPUReadbackRequest dataRequest = AsyncGPUReadback.Request(GpuOutputBuffer);
-			Debug.Log($"[CompressChunk] Requested GPU readback (simple overload): done={dataRequest.done}, hasError={dataRequest.hasError}, layerCount={dataRequest.layerCount}, width={dataRequest.width}, height={dataRequest.height}");
+			// Debug.Log($"[CompressChunk] Requested GPU readback (simple overload): done={dataRequest.done}, hasError={dataRequest.hasError}, layerCount={dataRequest.layerCount}, width={dataRequest.width}, height={dataRequest.height}");
 			while(!dataRequest.done) {
 				if(dataRequest.hasError) {
 					throw new Exception("GPU readback error (data)");
@@ -152,7 +144,7 @@ namespace Universe.Data.Chunk {
 			}
 			// Log first 16 bytes of output buffer for debugging
 			string firstBytes = string.Join(", ", compressedInts.Length > 4 ? new ArraySegment<int>(compressedInts, 0, 4) : compressedInts);
-			Debug.Log($"[CompressChunk] chunkID={chunkID} first 16 bytes of output buffer: [{firstBytes}]");
+			// Debug.Log($"[CompressChunk] chunkID={chunkID} first 16 bytes of output buffer: [{firstBytes}]");
 			// Convert int[] to byte[]
 			byte[] compressedData = new byte[compressedSize];
 			Buffer.BlockCopy(compressedInts, 0, compressedData, 0, compressedSize);

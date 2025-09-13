@@ -9,7 +9,7 @@ namespace Settings {
 	* Serializable settings for the game engine.
 	*/
 	public class EngineSettings : MonoBehaviour {
-		const string SettingsFilePath = "Config/settings.json";
+		string _settingsFilePath;
 
 		#region Performance Settings
 
@@ -78,6 +78,10 @@ namespace Settings {
 
 		void Start() {
 			Instance = this;
+			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
+				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
+			}
+			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/settings.json");
 			LoadSettings();
 		}
 
@@ -85,17 +89,17 @@ namespace Settings {
 		* Loads the settings from the config file.
 		*/
 		public void LoadSettings() {
-			if(File.Exists(SettingsFilePath)) {
+			if(File.Exists(_settingsFilePath)) {
 				try {
-					string json = File.ReadAllText(SettingsFilePath);
+					string json = File.ReadAllText(_settingsFilePath);
 					JsonUtility.FromJsonOverwrite(json, this);
-					Debug.Log("Settings loaded from " + SettingsFilePath);
+					Debug.Log("Settings loaded from " + _settingsFilePath);
 				} catch(Exception e) {
-					Debug.LogWarning("Failed to load settings from " + SettingsFilePath + ": " + e.Message);
+					Debug.LogWarning("Failed to load settings from " + _settingsFilePath + ": " + e.Message);
 					SetDefaults();
 				}
 			} else {
-				Debug.LogWarning("Settings file not found at " + SettingsFilePath + ". Using default settings.");
+				Debug.LogWarning("Settings file not found at " + _settingsFilePath + ". Using default settings.");
 				SetDefaults();
 			}
 
@@ -109,8 +113,8 @@ namespace Settings {
 		*/
 		public void SaveSettings() {
 			string json = JsonUtility.ToJson(this, true);
-			File.WriteAllText(SettingsFilePath, json);
-			Debug.Log("Settings saved to " + SettingsFilePath);
+			File.WriteAllText(_settingsFilePath, json);
+			Debug.Log("Settings saved to " + _settingsFilePath);
 		}
 
 		/**

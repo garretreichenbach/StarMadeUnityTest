@@ -382,6 +382,7 @@ GameObject:
   m_Component:
   - component: {fileID: 940402106}
   - component: {fileID: 940402105}
+  - component: {fileID: 940402107}
   m_Layer: 0
   m_Name: GalaxySceneTest
   m_TagString: Untagged
@@ -418,6 +419,29 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &940402107
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 940402104}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cd562e672d4a4c64c89d35ed52c2c109, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  worldSeed: 12345
+  chunkDimensions: {x: 3, y: 3, z: 3}
+  asteroidSettings:
+    radius: 40
+    centerX: 48
+    centerY: 48
+    centerZ: 48
+    noiseFrequency: 0.035
+    surfaceThickness: 10
+    shapeDistortion: 10
+  generateTestAsteroid: 0
 --- !u!1 &961739749
 GameObject:
   m_ObjectHideFlags: 0
@@ -672,7 +696,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: fc1799976fd453d4d89fcc546dfccfc3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  stats: 
   Mode: -1
 --- !u!4 &1316667653
 Transform:
@@ -807,6 +830,7 @@ MonoBehaviour:
     noiseFrequency: 0.035
     surfaceThickness: 10
     shapeDistortion: 10
+  generateTestAsteroid: 0
 --- !u!114 &1445307371
 MonoBehaviour:
   m_ObjectHideFlags: 0
