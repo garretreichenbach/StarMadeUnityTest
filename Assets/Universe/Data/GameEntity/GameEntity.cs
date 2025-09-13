@@ -106,18 +106,16 @@ namespace Universe.Data.GameEntity {
 
 		public async Task<bool> LoadChunkData() {
 			if(Loaded) {
-				Debug.LogWarning($"Entity {Name} is already loaded. Cannot load chunk data.");
+				Debug.LogWarning($"Entity {UID} is already loaded. Cannot load chunk data.");
 				return false;
 			}
 			byte[] rawCompressedData = await EntityDatabaseManager.Instance.ReadChunkData(ChunkDataPath);
 			if(rawCompressedData == null || rawCompressedData.Length == 0) {
-				Debug.LogWarning($"No chunk data found for entity {Name} at path {ChunkDataPath}.");
+				Debug.LogWarning($"No chunk data found for entity {UID} at path {ChunkDataPath}.");
 				return false;
 			}
 			_ = await ChunkMemoryManager.Instance.DecompressEntity(this, rawCompressedData);
 			// Do NOT call AllocateChunks here; decompression already fills Chunks array
-			Loaded = true;
-			RequestMeshRebuild();
 			return true;
 		}
 
@@ -161,11 +159,6 @@ namespace Universe.Data.GameEntity {
 			blockCount = 0;
 			triangleCount = 0;
 			vertexCount = 0;
-			if(!Loaded) {
-				_meshFilter.mesh.Clear();
-				_meshFilter.mesh.RecalculateBounds();
-				return;
-			}
 			if(Chunks == null || Chunks.Length == 0) {
 				AllocateChunks(ChunkDimensions);
 			}
@@ -198,6 +191,7 @@ namespace Universe.Data.GameEntity {
 			Mesh mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
 			_meshFilter.mesh = mesh;
+			Loaded = true;
 		}
 
 		public void RequestMeshRebuild() {
@@ -218,7 +212,7 @@ namespace Universe.Data.GameEntity {
 				// Generate a unique chunkID for each chunk (entityID shifted left, plus index)
 				long chunkID = ((long)EntityID << 32) | (uint)i;
 				// Only allocate if not already present in memory manager
-				if (!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
+				if(!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
 					ChunkMemoryManager.Instance.AllocateChunk(chunkID, EntityID, i);
 					Chunks[i] = new ChunkData(chunkID, ChunkMemoryManager.Instance._allocations[chunkID].PoolIndex);
 					// Optionally fill with default data if needed (for new entities only)
@@ -258,6 +252,19 @@ namespace Universe.Data.GameEntity {
 			public int[] ChunkDimensions {
 				get => new int[] { ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ };
 				set => (ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ) = (value[0], value[1], value[2]);
+			}
+		}
+
+		public void Teardown() {
+			_meshFilter.mesh.Clear();
+			_meshFilter.mesh.RecalculateBounds();
+			Loaded = false;
+		}
+
+		public void RequestTeardown() {
+			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
+			if(chunkGenQueue != null) {
+				chunkGenQueue.RequestTeardown(this);
 			}
 		}
 	}
