@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Threading.Tasks;
+using Settings;
 using Unity.VisualScripting;
 using Unity.VisualScripting.Dependencies.Sqlite;
 using UnityEngine;
@@ -11,6 +12,18 @@ namespace Universe.World {
 	* Manages the saving and loading of game entities to and from the database using LiteDB.
 	*/
 	public class EntityDatabaseManager : MonoBehaviour {
+		
+		[Header("Database Settings")]
+		[InspectorLabel("Instant Commit")]
+		[Tooltip("If true, changes to the database will be committed immediately. If false, changes will be batched and committed periodically.")]
+		public bool InstantCommit => ServerSettings.Instance.InstantCommit.Value;
+
+		[InspectorLabel("Auto Commit Interval (seconds)")]
+		[Tooltip("If Instant Commit is false, this is the interval in seconds at which changes will be committed to the database.")]
+		public float CommitInterval => ServerSettings.Instance.DatabaseAutoCommitInterval.Value;
+
+		bool _needsCommit = false;
+		float _commitTimer = 0f;
 
 		[Header("Database Stats")]
 		[InspectorLabel("Current Total Entities")]
@@ -94,6 +107,18 @@ namespace Universe.World {
 			}
 		}
 
+		void Update() {
+			if(!InstantCommit && _needsCommit) {
+				_commitTimer += Time.deltaTime;
+				if(_commitTimer >= CommitInterval) {
+					_db.Commit();
+					_commitTimer = 0f;
+					_needsCommit = false;
+					Debug.Log("Committed changes to the entity database.");
+				}
+			}
+		}
+
 		/**
 		* Initializes the database connection and sets up necessary collections and indexes.
 		*/
@@ -153,14 +178,18 @@ namespace Universe.World {
 						Debug.LogWarning($"Entity {entityUID} is marked as loaded but could not find the component in the scene.");
 					}
 					if(unloadPhysicalOnly) {
-						entity.RebuildMesh();
+						entity.RequestMeshRebuild();
 					} else {
 						Destroy(entity.gameObject);
 						_activeEntities.Remove(entityUID);
 					}
 				}
 				_db.Update(entity.Data);
-				_db.Commit();
+				if(InstantCommit) {
+					_db.Commit();
+				} else {
+					_needsCommit = true;
+				}
 			} else {
 				Debug.LogWarning($"Entity ID {entityUID} not found in active entities.");
 			}
@@ -222,11 +251,32 @@ namespace Universe.World {
 		/**
 		* Adds a new entity to the database if it doesn't already exist.
 		*/
-		public void InsertEntity(GameEntity data) {
-			_db.Insert(data.Data);
-			_db.Commit();
-			_activeEntities.Add(data.UID, data);
-			Debug.Log($"Inserted entity {data.Name} with UID {data.UID} into database.");
+		public void InsertEntity(GameEntity entity) {
+			_db.Insert(entity.Data);
+			if(InstantCommit) {
+				_db.Commit();
+			} else {
+				_needsCommit = true;
+			}
+			_activeEntities.Add(entity.UID, entity);
+			Debug.Log($"Inserted entity {entity.Name} with UID {entity.UID} into database.");
+		}
+
+		public async Task<bool> RemoveEntity(string uid) {
+			if(_activeEntities.ContainsKey(uid)) {
+				await UnloadEntity(uid);
+				_activeEntities.Remove(uid);
+				_db.Delete<GameEntity.GameEntityData>(uid);
+				if(InstantCommit) {
+					_db.Commit();
+				} else {
+					_needsCommit = true;
+				}
+				Debug.Log($"Removed entity {uid} from database.");
+				return true;
+			}
+			Debug.LogWarning($"Attempted to remove entity {uid} but it was not found in active entities.");
+			return false;
 		}
 
 		void OnDestroy() {

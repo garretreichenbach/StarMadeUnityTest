@@ -17,12 +17,13 @@ namespace Settings {
 		public List<ISettingsChangeListener> ChangeListeners { get; }
 	}
 
+	[Serializable]
 	public struct IntSettingsValue : ISettingsValue<int> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public int Value { get; private set; }
+		public int Value { get; set; }
 
 		public int DefaultValue { get; }
 
@@ -61,12 +62,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct IntOptionsSettingsValue : ISettingsValue<int> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public int Value { get; private set; }
+		public int Value { get; set; }
 
 		public int DefaultValue { get; }
 
@@ -102,12 +104,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct FloatSettingsValue : ISettingsValue<float> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public float Value { get; private set; }
+		public float Value { get; set; }
 
 		public float DefaultValue { get; }
 
@@ -146,12 +149,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct FloatOptionsSettingsValue : ISettingsValue<float> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public float Value { get; private set; }
+		public float Value { get; set; }
 
 		public float DefaultValue { get; }
 
@@ -187,12 +191,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct BoolSettingsValue : ISettingsValue<bool> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public bool Value { get; private set; }
+		public bool Value { get; set; }
 
 		public bool DefaultValue { get; }
 
@@ -220,12 +225,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct StringSettingsValue : ISettingsValue<string> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public string Value { get; private set; }
+		public string Value { get; set; }
 
 		public string DefaultValue { get; }
 
@@ -253,12 +259,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct StringOptionsSettingsValue : ISettingsValue<string> {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public string Value { get; private set; }
+		public string Value { get; set; }
 
 		public string DefaultValue { get; }
 
@@ -294,12 +301,13 @@ namespace Settings {
 		}
 	}
 
+	[Serializable]
 	public struct EnumSettingsValue<T> : ISettingsValue<T> where T : Enum {
 		public string Name { get; }
 
 		public string Description { get; }
 
-		public T Value { get; private set; }
+		public T Value { get; set; }
 
 		public T DefaultValue { get; }
 
