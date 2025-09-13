@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -21,15 +22,26 @@ namespace Universe.Data.Chunk {
 
 		// Waits for a chunk's GPU operation (compression or decompression) to complete.
 		// Returns true if the operation completed successfully, false otherwise.
-		void WaitForChunkOperation(long chunkID) {
+		async Task<bool> WaitForChunkOperationAsync(long chunkID) {
 			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation operation)) {
-				return;
+				return false;
 			}
-			// Wait for the TaskCompletionSource to complete (blocking)
 			try {
-				operation.CompletionSource.Task.Wait(TimeSpan.FromSeconds(ChunkOperationTimeout));
+				var completed = await Task.WhenAny(operation.CompletionSource.Task, Task.Delay(TimeSpan.FromSeconds(ChunkOperationTimeout)));
+				if(completed == operation.CompletionSource.Task) {
+					// Propagate result/exception
+					try {
+						return await operation.CompletionSource.Task;
+					} catch {
+						return false;
+					}
+				} else {
+					Debug.LogError($"Timeout waiting for chunk operation {chunkID}");
+					return false;
+				}
 			} catch(Exception ex) {
 				Debug.LogError($"Error waiting for chunk operation: {ex.Message}");
+				return false;
 			}
 		}
 
@@ -96,6 +108,20 @@ namespace Universe.Data.Chunk {
 
 		// Async operation tracking
 		Dictionary<long, CompressionOperation> _activeOperations;
+		// Pending compressed chunk writes enqueued by the compression manager's GPU readback callbacks.
+		Queue<PendingCompressedWrite> _pendingCompressedWrites;
+		object _pendingCompressedWritesLock;
+		// Pending decompressed chunk writes (int arrays) queued by decompression readbacks.
+		Queue<PendingDecompressedWrite> _pendingDecompressedWrites;
+		object _pendingDecompressedWritesLock;
+		// Adaptive throttling: maximum milliseconds per frame to spend committing compressed writes.
+		[Header("Compression Commit Throttling")]
+		[SerializeField] float maxCommitMsPerFrame = 2.0f; // ms budget per frame for commits. 0 = unlimited (use count fallback)
+		[SerializeField] int maxCompressedWritesPerFrame = 8; // fallback limit when maxCommitMsPerFrame <= 0
+		// Backpressure: max queued compressed blobs before we start logging warnings or delaying further dispatches
+		[SerializeField] int pendingWriteBackpressureThreshold = 256;
+		// TODO: Implement stronger backpressure: pause dispatching new GPU batches when pending queues grow too large.
+		// For now we warn when the queue exceeds pendingWriteBackpressureThreshold
 
 		#endregion
 
@@ -164,7 +190,21 @@ namespace Universe.Data.Chunk {
 			public ChunkState TargetState;
 			public TaskCompletionSource<bool> CompletionSource;
 			public AsyncGPUReadbackRequest? ReadbackRequest;
+			public int ReservedPoolIndex; // for decompression: reserved uncompressed pool slot
 			public float StartTime;
+		}
+
+		public struct PendingCompressedWrite {
+			public long ChunkID;
+			public byte[] Data;
+			public bool ReturnToPool; // if true, Commit will return Data to ArrayPool<byte>
+		}
+
+		public struct PendingDecompressedWrite {
+			public long ChunkID;
+			public int PoolIndex;
+			public int[] Data;
+			public bool ReturnToPool; // if true, Commit will return Data to ArrayPool<int>
 		}
 
 		#endregion
@@ -185,6 +225,10 @@ namespace Universe.Data.Chunk {
 			InitializeGPUResources();
 			// Initialize GPU mutex
 			_gpuMutex = new SemaphoreSlim(1, 1);
+			_pendingCompressedWrites = new Queue<PendingCompressedWrite>();
+			_pendingCompressedWritesLock = new object();
+			_pendingDecompressedWrites = new Queue<PendingDecompressedWrite>();
+			_pendingDecompressedWritesLock = new object();
 		}
 
 		void InitializeMemoryPools() {
@@ -278,7 +322,14 @@ namespace Universe.Data.Chunk {
 			_headers.Add(chunkID, header);
 
 			// Zero out the allocated memory
-			ClearChunkMemory(poolIndex);
+			// NOTE: Clearing allocated memory synchronously here can cause a noticeable spike when many chunks
+			// are allocated at once (e.g. entity load). The previous implementation performed a job and called
+			// .Complete(), which blocks the main thread. To avoid brief editor freezes we defer clearing. The
+			// chunk memory will be overwritten by generation/decompression operations in typical flows, so explicit
+			// clearing is not required. If we need zeroed memory for some code paths, implement a lazy clear or
+			// schedule the clear job without blocking and ensure consumers handle uninitialized data.
+			// TODO: Implement a background clearing queue that spreads memzero work across frames if needed.
+			// ClearChunkMemory(poolIndex);
 
 			return true;
 		}
@@ -495,12 +546,13 @@ namespace Universe.Data.Chunk {
 				return false; // Can only decompress compressed chunks
 			}
 			// Do NOT set state to GPUDecompressing here!
-			Debug.Log($"[DecompressChunk] Chunk {chunkID} calling compressionManager.DecompressChunk");
+			// Debug.Log($"[DecompressChunk] Chunk {chunkID} calling compressionManager.DecompressChunk");
 			CompressionOperation operation = new CompressionOperation {
 				ChunkID = chunkID,
 				TargetState = ChunkState.Uncompressed,
 				CompletionSource = new TaskCompletionSource<bool>(),
 				StartTime = Time.time,
+				ReservedPoolIndex = -1,
 			};
 			_activeOperations[chunkID] = operation;
 			ChunkCompressionManager compressionManager = CompressionManager;
@@ -509,18 +561,20 @@ namespace Universe.Data.Chunk {
 					// Serialize GPU access to avoid concurrent buffer reuse
 					await _gpuMutex.WaitAsync();
 					try {
-						await compressionManager.DecompressChunk(chunkID);
-						// After decompression, verify state
-						allocation = _allocations[chunkID];
-						if(allocation.State == ChunkState.Uncompressed) {
-							Debug.Log($"[DecompressChunk] Chunk {chunkID} successfully decompressed and state set to Uncompressed");
-							operation.CompletionSource.SetResult(true);
-						} else {
-							Debug.LogError($"Chunk {chunkID} state invalid after decompression: {allocation.State}");
-							allocation.State = ChunkState.Compressed;
-							_allocations[chunkID] = allocation;
-							operation.CompletionSource.SetException(new Exception("Invalid chunk state after decompression"));
+						// Reserve uncompressed slot here and store it on the operation so the compression manager and later commit can use it.
+						if(_freeUncompressedSlots.Count == 0) {
+							// No slot available; fail
+							operation.CompletionSource.SetException(new Exception("No free uncompressed slots available for decompression"));
+							_activeOperations[chunkID] = operation;
+							_gpuMutex.Release();
+							return false;
 						}
+						int poolIndex = _freeUncompressedSlots.Dequeue();
+						operation.ReservedPoolIndex = poolIndex;
+						_activeOperations[chunkID] = operation;
+						// Ask compression manager to start decompression and arrange readback; it will attach the readback request to our operation via SetOperationReadbackRequest.
+						await compressionManager.DecompressChunk(chunkID, poolIndex);
+						// Return control to caller; final completion happens when the main-thread commit executes.
 					} finally {
 						_gpuMutex.Release();
 					}
@@ -588,7 +642,9 @@ namespace Universe.Data.Chunk {
 		*/
 		public async Task<bool> DecompressEntity(GameEntity.GameEntity gameEntity, byte[] rawCompressedData) {
 			var entityData = new System.IO.MemoryStream(rawCompressedData);
-			var decompressionTasks = new List<Task<bool>>();
+			var pendingCompressOpTasks = new List<Task>();
+			var decompressAfterCommit = new List<long>();
+			var pendingIndexMap = new Dictionary<long, int>();
 			int chunksTotal = gameEntity.ChunkCount;
 			int chunksRead = 0;
 			int chunksFailed = 0;
@@ -646,29 +702,60 @@ namespace Universe.Data.Chunk {
 					continue;
 				}
 
-				// Decompress chunk (add task to list, do not await here)
-				var decompressTask = DecompressChunk(chunkID).ContinueWith(task => {
-					bool decompressed = task.Status == TaskStatus.RanToCompletion && task.Result;
-					if(decompressed) {
-						if(_allocations.TryGetValue(chunkID, out var alloc) && alloc.PoolIndex >= 0 && chunkIndex >= 0 && chunkIndex < gameEntity.Chunks.Length) {
-							gameEntity.Chunks[chunkIndex] = new ChunkData(chunkID, alloc.PoolIndex);
-							// Log chunk assignment and first 8 block types
-							int[] blockData = _uncompressedPool.GetSubArray(alloc.PoolIndex * 32 * 32 * 32, 8).ToArray();
-							string blockPreview = string.Join(", ", blockData);
-							Debug.Log($"[DecompressEntity] Assigned chunkID={chunkID} to index={chunkIndex}, first 8 block types: [{blockPreview}]");
-						}
-					} else {
-						Debug.LogError($"Failed to decompress chunk {chunkID} for entity {gameEntity.Name}");
-						chunksFailed++;
-					}
-					return decompressed;
-				});
-				decompressionTasks.Add(decompressTask);
+				// Enqueue compressed blob for throttled commit on main thread.
+				// Create an active CompressionOperation so callers can await the commit.
+				CompressionOperation op = new CompressionOperation {
+					ChunkID = chunkID,
+					TargetState = ChunkState.Compressed,
+					CompletionSource = new TaskCompletionSource<bool>(),
+					StartTime = Time.time,
+				};
+				_activeOperations[chunkID] = op;
+				// Enqueue the compressed data (the actual copy into the compressed pool will be throttled in Update)
+				EnqueueCompressedWrite(chunkID, compressedData, false);
+				// Collect the per-chunk task so we can await all commits after dispatch
+				var t = GetChunkOperationTask(chunkID);
+				if(t != null) pendingCompressOpTasks.Add(t);
+				// After commit completes, we need to decompress this chunk
+				decompressAfterCommit.Add(chunkID);
+				// Track mapping for post-processing on main thread
+				if(!pendingIndexMap.ContainsKey(chunkID)) pendingIndexMap.Add(chunkID, chunkIndex);
 			}
 
-			// Wait for all decompression tasks to complete after starting them all
+			// Wait for all compressed commits to complete (commits are throttled and happen in Update)
+			if(pendingCompressOpTasks.Count > 0) {
+				try {
+					await Task.WhenAll(pendingCompressOpTasks);
+				} catch { }
+			}
+
+			// Now that compressed blobs are committed (allocations updated), start decompression for those chunks
+			var decompressionTasks = new List<Task<bool>>();
+			foreach(var id in decompressAfterCommit) {
+				decompressionTasks.Add(DecompressChunk(id));
+			}
 			if(decompressionTasks.Count > 0) {
-				await Task.WhenAll(decompressionTasks);
+				try {
+					await Task.WhenAll(decompressionTasks);
+				} catch { }
+			}
+
+			// Post-process assignments on main thread (safe to access NativeArray)
+			foreach(var kv in pendingIndexMap) {
+				long id = kv.Key;
+				int idx = kv.Value;
+				if(_allocations.TryGetValue(id, out var alloc) && alloc.PoolIndex >= 0 && idx >= 0 && idx < gameEntity.Chunks.Length) {
+					gameEntity.Chunks[idx] = new ChunkData(id, alloc.PoolIndex);
+					// Log preview (first 8 ints)
+					try {
+						int[] blockData = _uncompressedPool.GetSubArray(alloc.PoolIndex * BlocksPerChunk, Math.Min(8, BlocksPerChunk)).ToArray();
+						string blockPreview = string.Join(", ", blockData);
+						// Debug.Log($"[DecompressEntity] Assigned chunkID={id} to index={idx}, first 8 block types: [{blockPreview}]");
+					} catch(Exception) { }
+				} else {
+					// If allocation is missing, count as failed
+					chunksFailed++;
+				}
 			}
 
 			if(chunksFailed > 0) {
@@ -709,6 +796,7 @@ namespace Universe.Data.Chunk {
 				}
 			}
 
+			var pendingOpTasks = new List<Task>();
 			if(toCompress.Count > 0) {
 				// Process in batches to respect GPU batch capacity
 				ChunkCompressionManager compressionManager = CompressionManager;
@@ -722,13 +810,24 @@ namespace Universe.Data.Chunk {
 								long[] batchIds = new long[len];
 								toCompress.CopyTo(start, batchIds, 0, len);
 								try {
-									await compressionManager.CompressChunks(batchIds);
+									// Dispatch the batch synchronously while holding GPU mutex. CompressChunksAsync returns a Task that will
+									// complete when per-chunk CompletionSources are resolved. We don't await here to allow dispatching multiple batches quickly.
+									var batchTask = compressionManager.CompressChunksAsync(batchIds);
+									// Collect per-chunk operation tasks so we can await them after dispatching all batches.
+									foreach(var id in batchIds) {
+										var t = GetChunkOperationTask(id);
+										if(t != null) pendingOpTasks.Add(t);
+									}
+									// We don't await batchTask here; it is safe to let it run and we will await _pendingOpTasks later.
 								} catch(Exception exBatch) {
 									Debug.LogError($"Batch GPU compression failed for batch starting at {start}: {exBatch.Message}");
 									// Reset states for this batch so caller can retry individual chunks
 									for(int bi = 0; bi < batchIds.Length; ++bi) {
 										long id = batchIds[bi];
-										if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
+										if(_allocations.TryGetValue(id, out var a)) {
+											a.State = ChunkState.Uncompressed;
+											_allocations[id] = a;
+										}
 									}
 									// continue with next batch
 								}
@@ -740,15 +839,30 @@ namespace Universe.Data.Chunk {
 						Debug.LogError($"Batch GPU compression outer failure: {ex.Message}");
 						// Reset any remaining toCompress entries to Uncompressed
 						foreach(var id in toCompress) {
-							if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
+							if(_allocations.TryGetValue(id, out var a)) {
+								a.State = ChunkState.Uncompressed;
+								_allocations[id] = a;
+							}
 						}
 					}
 				} else {
 					Debug.LogError("No ChunkCompressionManager available for batch compression");
 					// Reset states
 					foreach(var id in toCompress) {
-						if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
+						if(_allocations.TryGetValue(id, out var a)) {
+							a.State = ChunkState.Uncompressed;
+							_allocations[id] = a;
+						}
 					}
+				}
+			}
+
+			// After dispatching all batches, await all per-chunk completion tasks (avoids blocking the main thread during callbacks).
+			if(pendingOpTasks.Count > 0) {
+				try {
+					await Task.WhenAll(pendingOpTasks);
+				} catch {
+					// individual operation exceptions are handled per chunk via CompleteCompressionOperation
 				}
 			}
 
@@ -760,9 +874,11 @@ namespace Universe.Data.Chunk {
 					continue;
 				}
 
+				// At this point all requested compress operations were awaited above; no per-chunk blocking expected here.
 				if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
-					Debug.LogWarning($"Chunk {chunk._chunkID} is being processed, waiting for compression");
-					WaitForChunkOperation(chunk._chunkID);
+					Debug.LogWarning($"Chunk {chunk._chunkID} still in processing state after waiting: {allocation.State}");
+					// best-effort: try one final await
+					await WaitForChunkOperationAsync(chunk._chunkID);
 				}
 
 				// Now the chunk should be compressed
@@ -817,19 +933,48 @@ namespace Universe.Data.Chunk {
 		}
 
 		void ProcessCompletedOperation(CompressionOperation operation) {
-			// TODO: Implement based on operation type
-			operation.CompletionSource.SetResult(true);
+			// If the operation contains a GPU readback request that is done, move its data into the pending queues for main-thread commit.
+			try {
+				if(operation.ReadbackRequest.HasValue && operation.ReadbackRequest.Value.done) {
+					// If this operation was a decompression (TargetState == Uncompressed), extract ints and enqueue decompressed write
+					if(operation.TargetState == ChunkState.Uncompressed) {
+						try {
+							int[] decompressed = operation.ReadbackRequest.Value.GetData<int>().ToArray();
+							// Enqueue into pending decompressed writes using the reserved pool index
+							PendingDecompressedWrite pdw = new PendingDecompressedWrite { ChunkID = operation.ChunkID, PoolIndex = operation.ReservedPoolIndex, Data = decompressed };
+							lock(_pendingDecompressedWritesLock) {
+								_pendingDecompressedWrites.Enqueue(pdw);
+							}
+							// Do NOT complete the operation here; completion will be signaled when the main-thread commit finishes.
+							return;
+						} catch(Exception ex) {
+							Debug.LogError($"Failed processing decompression readback for chunk {operation.ChunkID}: {ex.Message}");
+							try {
+								CompleteCompressionOperation(operation.ChunkID, false, ex);
+							} catch { }
+							return;
+						}
+					}
+					// For other operation types we can simply mark as completed; compressed-path completions are handled elsewhere.
+					try {
+						operation.CompletionSource.SetResult(true);
+					} catch { }
+					return;
+				}
+			} catch(Exception ex) {
+				Debug.LogError($"Error in ProcessCompletedOperation for chunk {operation.ChunkID}: {ex.Message}");
+				try {
+					operation.CompletionSource.SetException(ex);
+				} catch { }
+			}
 		}
 
-		// Allow external callers (e.g. ChunkCompressionManager) to complete per-chunk compression operations
-		public void CompleteCompressionOperation(long chunkID, bool success, Exception ex = null) {
+		// Allow ChunkCompressionManager to attach a readback request and reserved pool index to an active operation.
+		public void SetOperationReadbackRequest(long chunkID, AsyncGPUReadbackRequest request, int reservedPoolIndex) {
 			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) return;
-			if(success) {
-				try { op.CompletionSource.SetResult(true); } catch { }
-			} else {
-				try { op.CompletionSource.SetException(ex ?? new Exception("Compression failed (batch)")); } catch { }
-			}
-			_activeOperations.Remove(chunkID);
+			op.ReadbackRequest = request;
+			op.ReservedPoolIndex = reservedPoolIndex;
+			_activeOperations[chunkID] = op;
 		}
 
 		#endregion
@@ -852,6 +997,72 @@ namespace Universe.Data.Chunk {
 		void Update() {
 			// Process pending compression operations
 			UpdateCompressionOperations();
+
+			// Commit pending compressed writes using an adaptive time-budget to avoid hitches.
+			// Process both decompressed and compressed pending writes within the time budget. Decompressed writes are prioritized
+			// because they are required for entity load/usage. Both queues are serviced under the same budget to avoid hitches.
+			bool hasPendingAny = false;
+			lock(_pendingCompressedWritesLock) {
+				if(_pendingCompressedWrites != null && _pendingCompressedWrites.Count > 0) hasPendingAny = true;
+			}
+			lock(_pendingDecompressedWritesLock) {
+				if(_pendingDecompressedWrites != null && _pendingDecompressedWrites.Count > 0) hasPendingAny = true;
+			}
+			if(hasPendingAny) {
+				float start = Time.realtimeSinceStartup * 1000f; // ms
+				int processed = 0;
+				while(true) {
+					// Prioritize decompressed writes
+					PendingDecompressedWrite dwrite;
+					bool hadDecomp = false;
+					lock(_pendingDecompressedWritesLock) {
+						if(_pendingDecompressedWrites.Count > 0) {
+							dwrite = _pendingDecompressedWrites.Dequeue();
+							hadDecomp = true;
+						} else dwrite = default;
+					}
+					if(hadDecomp) {
+						CommitPendingDecompressedWrite(dwrite);
+						processed++;
+					} else {
+						// No decompressed work, do compressed
+						PendingCompressedWrite cwrite;
+						bool hadComp = false;
+						lock(_pendingCompressedWritesLock) {
+							if(_pendingCompressedWrites.Count > 0) {
+								cwrite = _pendingCompressedWrites.Dequeue();
+								hadComp = true;
+							} else cwrite = default;
+						}
+						if(hadComp) {
+							CommitPendingCompressedWrite(cwrite);
+							processed++;
+						} else {
+							// Nothing to do
+							break;
+						}
+					}
+					// Backpressure logging (sample counts under lock)
+					int compRem = 0, decompRem = 0;
+					lock(_pendingCompressedWritesLock) {
+						compRem = _pendingCompressedWrites.Count;
+					}
+					lock(_pendingDecompressedWritesLock) {
+						decompRem = _pendingDecompressedWrites.Count;
+					}
+					int totalRem = compRem + decompRem;
+					if(totalRem > pendingWriteBackpressureThreshold) {
+						Debug.LogWarning($"Pending writes queue large: compressed={compRem} decompressed={decompRem} total={totalRem}");
+					}
+					// Check time budget
+					if(maxCommitMsPerFrame > 0f) {
+						float now = Time.realtimeSinceStartup * 1000f;
+						if(now - start >= maxCommitMsPerFrame) break;
+					} else {
+						if(processed >= maxCompressedWritesPerFrame) break;
+					}
+				}
+			}
 		}
 
 		#endregion
@@ -919,7 +1130,7 @@ namespace Universe.Data.Chunk {
 
 			// Ensure state is compressed
 			if(!_allocations.TryGetValue(chunkID, out alloc) || alloc.State != ChunkState.Compressed) {
-				Debug.LogError($"[TestCompressionRoundTrip] Chunk {chunkID} not in compressed state after compression (state={( _allocations.TryGetValue(chunkID, out alloc) ? alloc.State.ToString() : "missing")})");
+				Debug.LogError($"[TestCompressionRoundTrip] Chunk {chunkID} not in compressed state after compression (state={(_allocations.TryGetValue(chunkID, out alloc) ? alloc.State.ToString() : "missing")})");
 				return false;
 			}
 
@@ -960,7 +1171,7 @@ namespace Universe.Data.Chunk {
 
 		// Public helpers for tools
 		public long[] GetAllChunkIDs() {
-			var keys = new System.Collections.Generic.List<long>();
+			var keys = new List<long>();
 			foreach(var kvp in _allocations) {
 				keys.Add(kvp.Key);
 			}
@@ -971,6 +1182,188 @@ namespace Universe.Data.Chunk {
 			if(_headers.TryGetValue(chunkID, out header)) return true;
 			header = default;
 			return false;
+		}
+
+		// Return the Task representing the active compression/decompression operation for a chunk, or null if none.
+		public Task GetChunkOperationTask(long chunkID) {
+			if(_activeOperations != null && _activeOperations.TryGetValue(chunkID, out CompressionOperation op)) return op.CompletionSource?.Task;
+			return null;
+		}
+		// Called by GPU readback callback to enqueue a compressed blob for main-thread commit.
+		public void EnqueueCompressedWrite(long chunkID, byte[] data) {
+			EnqueueCompressedWrite(chunkID, data, false);
+		}
+
+		public void EnqueueCompressedWrite(long chunkID, byte[] data, bool returnToPool) {
+			if(data == null) throw new ArgumentNullException(nameof(data));
+			lock(_pendingCompressedWritesLock) {
+				_pendingCompressedWrites.Enqueue(new PendingCompressedWrite { ChunkID = chunkID, Data = data, ReturnToPool = returnToPool });
+			}
+		}
+
+		// Called by decompression readbacks (on main thread) to enqueue decompressed int arrays for main-thread commit.
+		public void EnqueueDecompressedWrite(long chunkID, int poolIndex, int[] data) {
+			EnqueueDecompressedWrite(chunkID, poolIndex, data, false);
+		}
+
+		public void EnqueueDecompressedWrite(long chunkID, int poolIndex, int[] data, bool returnToPool) {
+			if(data == null) throw new ArgumentNullException(nameof(data));
+			lock(_pendingDecompressedWritesLock) {
+				_pendingDecompressedWrites.Enqueue(new PendingDecompressedWrite { ChunkID = chunkID, PoolIndex = poolIndex, Data = data, ReturnToPool = returnToPool });
+			}
+		}
+
+		void CommitPendingCompressedWrite(PendingCompressedWrite write) {
+			long chunkID = write.ChunkID;
+			byte[] compressedBytes = write.Data;
+			int totalBytes = compressedBytes.Length;
+			if(totalBytes <= 0) {
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Empty compressed blob"));
+				} catch { }
+				return;
+			}
+			// Reserve space in compressed pool atomically
+			int newHead = Interlocked.Add(ref _compressedPoolHead, totalBytes);
+			int poolOffset = newHead - totalBytes;
+			if(poolOffset + totalBytes > _compressedPool.Length) {
+				Interlocked.Add(ref _compressedPoolHead, -totalBytes);
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Compressed pool out of memory (commit)"));
+				} catch { }
+				return;
+			}
+			// Copy bytes into NativeArray on main thread using bulk CopyFrom
+			var destBytes = _compressedPool.GetSubArray(poolOffset, totalBytes);
+			destBytes.CopyFrom(compressedBytes);
+
+			// Update allocation and header
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation alloc)) {
+				Interlocked.Add(ref _compressedPoolHead, -totalBytes);
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Chunk allocation not found (commit)"));
+				} catch { }
+				return;
+			}
+			int oldPoolIndex = alloc.PoolIndex;
+			alloc.CompressedOffset = poolOffset;
+			alloc.CompressedSize = totalBytes;
+			alloc.State = ChunkState.Compressed;
+			alloc.PoolIndex = -1;
+			_allocations[chunkID] = alloc;
+
+			if(_headers.TryGetValue(chunkID, out ChunkHeader header)) {
+				header.State = ChunkState.Compressed;
+				header.CompressedSize = totalBytes;
+				header.IsDirty = false;
+				_headers[chunkID] = header;
+			} else {
+				Interlocked.Add(ref _compressedPoolHead, -totalBytes);
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Chunk header not found (commit)"));
+				} catch { }
+				return;
+			}
+
+			if(oldPoolIndex >= 0) _freeUncompressedSlots.Enqueue(oldPoolIndex);
+			try {
+				CompleteCompressionOperation(chunkID, true, null);
+			} catch { }
+			// Return pooled buffer if caller indicated so
+			if(write.ReturnToPool) {
+				try {
+					ArrayPool<byte>.Shared.Return(write.Data);
+				} catch { }
+			}
+		}
+
+		void CommitPendingDecompressedWrite(PendingDecompressedWrite write) {
+			long chunkID = write.ChunkID;
+			int poolIndex = write.PoolIndex;
+			int[] decompressedInts = write.Data;
+			if(decompressedInts == null || decompressedInts.Length != BlocksPerChunk) {
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Invalid decompressed blob"));
+				} catch { }
+				// Return the reserved pool slot if present
+				if(poolIndex >= 0) _freeUncompressedSlots.Enqueue(poolIndex);
+				return;
+			}
+
+			// Copy into uncompressed pool (main thread) using bulk CopyFrom
+			int startIndex = poolIndex * BlocksPerChunk;
+			var dest = _uncompressedPool.GetSubArray(startIndex, BlocksPerChunk);
+			dest.CopyFrom(decompressedInts);
+
+			// Update allocation and header
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation alloc)) {
+				// allocation missing, free slot and fail
+				_freeUncompressedSlots.Enqueue(poolIndex);
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Chunk allocation not found (decompress commit)"));
+				} catch { }
+				return;
+			}
+			alloc.PoolIndex = poolIndex;
+			alloc.CompressedOffset = -1;
+			alloc.CompressedSize = 0;
+			alloc.State = ChunkState.Uncompressed;
+			_allocations[chunkID] = alloc;
+
+			if(_headers.TryGetValue(chunkID, out ChunkHeader header)) {
+				header.State = ChunkState.Uncompressed;
+				header.CompressedSize = 0;
+				header.IsDirty = false;
+				_headers[chunkID] = header;
+			} else {
+				// Should not happen, but rollback
+				alloc.PoolIndex = -1;
+				_allocations[chunkID] = alloc;
+				_freeUncompressedSlots.Enqueue(poolIndex);
+				try {
+					CompleteCompressionOperation(chunkID, false, new Exception("Chunk header not found (decompress commit)"));
+				} catch { }
+				return;
+			}
+
+			// Signal completion to any waiter
+			try {
+				CompleteCompressionOperation(chunkID, true, null);
+			} catch { }
+			// Return rented int[] to pool if requested
+			if(write.ReturnToPool) {
+				try {
+					ArrayPool<int>.Shared.Return(decompressedInts);
+				} catch { }
+			}
+		}
+
+		// Finalize a compression/decompression operation: set result/exception and remove active operation.
+		// This is called from main-thread commit paths and GPU callbacks to signal completion to awaiters.
+		public void CompleteCompressionOperation(long chunkID, bool success, Exception error) {
+			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) {
+				return; // nothing to complete
+			}
+			try {
+				if(success) {
+					try {
+						op.CompletionSource?.SetResult(true);
+					} catch { }
+				} else {
+					if(error != null) {
+						try {
+							op.CompletionSource?.SetException(error);
+						} catch { }
+					} else {
+						try {
+							op.CompletionSource?.SetResult(false);
+						} catch { }
+					}
+				}
+			} finally {
+				// Remove active operation record
+				_activeOperations.Remove(chunkID);
+			}
 		}
 	}
 }

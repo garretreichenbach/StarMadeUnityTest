@@ -185,7 +185,7 @@ namespace Universe.Data.GameEntity {
 					continue;
 				}
 				Vector3 chunkPos = GetChunkPosition(i);
-				Debug.Log($"[GameEntity] RebuildMesh: Building chunk {i} (chunkID={(chunk is ChunkData cdx ? cdx._chunkID.ToString() : "?")})");
+				// Debug.Log($"[GameEntity] RebuildMesh: Building chunk {i} (chunkID={(chunk is ChunkData cdx ? cdx._chunkID.ToString() : "?")})");
 				ChunkBuildResult result = ChunkBuilder.BuildChunk(chunk);
 				combine[i].mesh = result.mesh;
 				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);

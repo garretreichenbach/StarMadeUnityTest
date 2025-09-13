@@ -1,16 +1,20 @@
 ﻿// ChunkCompressor.compute
-// Todo: This is ok, but we should do something a little more advanced later
 // GPU chunk compression shader (LZ4-style, parallel per block column)
 // Thread group: [numthreads(32,32,1)]
 
 // Input: 32x32x32 blocks, 4 bytes each (int)
 // Output: Compressed data (byte stream), metadata (compressed size)
 
-#pragma kernel CSMain
+#pragma kernel CSComputeSizes
+#pragma kernel CSWritePayloads
 
 StructuredBuffer<int>    ChunkInput; // [batch * 32*32*32] input blocks
-RWByteAddressBuffer      ChunkCompressedOutput; // Output compressed data (per-chunk regions)
+RWByteAddressBuffer      ChunkCompressedOutput; // per-chunk output (unused in sizes pass)
 RWStructuredBuffer<uint> ChunkMetadata; // per-chunk [payloadSize, originalSize]
+
+// For write pass
+StructuredBuffer<uint>   ChunkBaseBytes; // byte base offset for each chunk in the compact buffer
+RWByteAddressBuffer      GlobalCompressedOutput; // compacted output buffer (all chunks concatenated)
 
 // Constants
 #define CHUNK_SIZE_X 32
@@ -19,28 +23,63 @@ RWStructuredBuffer<uint> ChunkMetadata; // per-chunk [payloadSize, originalSize]
 #define BLOCKS_PER_CHUNK (CHUNK_SIZE_X*CHUNK_SIZE_Y*CHUNK_SIZE_Z)
 #define COLUMN_COUNT (CHUNK_SIZE_X*CHUNK_SIZE_Y)
 
-// Maximum per-chunk output reserved in bytes (must match C# per-chunk allocation)
-// maxOutputInts = 32*32*32*2 = 65536 ints -> bytes = 65536 * 4 = 262144
-#define PER_CHUNK_OUTPUT_BYTES 262144
-
 // Per-column shared arrays: local byte counts and final offsets (in column order)
 groupshared uint sharedLocalBytes[COLUMN_COUNT];
 groupshared uint sharedOffsets[COLUMN_COUNT];
 
+// Compute only sizes: do the per-column compression locally and sum sizes to write payloadSize into metadata
 [numthreads(32,32,1)]
-void CSMain(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_GroupID)
-{
-    uint chunkIndex = groupId.x; // which chunk in the batch
+void CSComputeSizes(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_GroupID) {
+    uint chunkIndex = groupId.x;
     uint lx = groupThread.x;
     uint ly = groupThread.y;
     bool inBounds = (lx < CHUNK_SIZE_X && ly < CHUNK_SIZE_Y);
-
     uint columnOffset = lx + ly * CHUNK_SIZE_X;
-    // Input is laid out per-chunk consecutively
+    uint inputBase = chunkIndex * BLOCKS_PER_CHUNK + columnOffset * CHUNK_SIZE_Z;
+    uint localBytes = 0;
+    // simple RLE per column
+    if(inBounds) {
+        int prev = ChunkInput[inputBase];
+        uint runLength = 1;
+        for(uint z = 1; z < CHUNK_SIZE_Z; ++z) {
+            int curr = ChunkInput[inputBase + z];
+            if(curr == prev && runLength < 0xFFFFFFFF) {
+                runLength++;
+            } else {
+                localBytes += 8;
+                prev = curr;
+                runLength = 1;
+            }
+        }
+        localBytes += 8;
+    }
+    if(inBounds) sharedLocalBytes[columnOffset] = localBytes; else sharedLocalBytes[columnOffset] = 0;
+    GroupMemoryBarrierWithGroupSync();
+    if(lx == 0 && ly == 0) {
+        uint running = 0;
+        for(uint i = 0; i < COLUMN_COUNT; ++i) {
+            uint v = sharedLocalBytes[i];
+            sharedOffsets[i] = running;
+            running += v;
+        }
+        // write payload size and original size into metadata
+        ChunkMetadata[chunkIndex * 2 + 0] = running;
+        ChunkMetadata[chunkIndex * 2 + 1] = BLOCKS_PER_CHUNK * 4;
+    }
+}
+
+// Second pass: write compacted output into GlobalCompressedOutput using ChunkBaseBytes[chunkIndex] as byte base
+[numthreads(32,32,1)]
+void CSWritePayloads(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_GroupID) {
+    uint chunkIndex = groupId.x;
+    uint lx = groupThread.x;
+    uint ly = groupThread.y;
+    bool inBounds = (lx < CHUNK_SIZE_X && ly < CHUNK_SIZE_Y);
+    uint columnOffset = lx + ly * CHUNK_SIZE_X;
     uint inputBase = chunkIndex * BLOCKS_PER_CHUNK + columnOffset * CHUNK_SIZE_Z;
 
-    uint localCompressed[CHUNK_SIZE_Z * 2]; // value, runLength pairs
-    uint localBytes = 0;
+    uint localCompressed[CHUNK_SIZE_Z * 2]; // temp store value,run pairs
+    uint localBytes = 0u;
 
     if(inBounds) {
         int prev = ChunkInput[inputBase];
@@ -50,14 +89,14 @@ void CSMain(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_GroupID)
             if(curr == prev && runLength < 0xFFFFFFFF) {
                 runLength++;
             } else {
-                localCompressed[localBytes / 4] = prev;
+                localCompressed[localBytes / 4] = asuint(prev);
                 localCompressed[localBytes / 4 + 1] = runLength;
                 localBytes += 8;
                 prev = curr;
                 runLength = 1;
             }
         }
-        localCompressed[localBytes / 4] = prev;
+        localCompressed[localBytes / 4] = asuint(prev);
         localCompressed[localBytes / 4 + 1] = runLength;
         localBytes += 8;
     }
@@ -74,27 +113,23 @@ void CSMain(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_GroupID)
             sharedOffsets[i] = running;
             running += v;
         }
-        // write offset table (4 bytes per column) at chunkBase
-        uint chunkBase = chunkIndex * PER_CHUNK_OUTPUT_BYTES;
+        // write offset table starting at chunkBase
+        uint chunkBase = ChunkBaseBytes[chunkIndex];
         for(uint i = 0; i < COLUMN_COUNT; ++i) {
-            ChunkCompressedOutput.Store(chunkBase + i * 4, sharedOffsets[i]);
+            GlobalCompressedOutput.Store(chunkBase + i * 4, sharedOffsets[i]);
         }
-        // write payload size and original size into metadata
-        ChunkMetadata[chunkIndex * 2 + 0] = running;
-        ChunkMetadata[chunkIndex * 2 + 1] = BLOCKS_PER_CHUNK * 4;
     }
     GroupMemoryBarrierWithGroupSync();
 
     if(inBounds) {
-        uint chunkBase = chunkIndex * PER_CHUNK_OUTPUT_BYTES;
+        uint chunkBase = ChunkBaseBytes[chunkIndex];
         uint dataStart = chunkBase + COLUMN_COUNT * 4;
         uint outPtr = sharedOffsets[columnOffset];
-        // write payload bytes after table
         for(uint i = 0; i < localBytes; i += 8) {
             uint v0 = localCompressed[i / 4];
             uint v1 = localCompressed[i / 4 + 1];
-            ChunkCompressedOutput.Store(dataStart + outPtr + i, v0);
-            ChunkCompressedOutput.Store(dataStart + outPtr + i + 4, v1);
+            GlobalCompressedOutput.Store(dataStart + outPtr + i, v0);
+            GlobalCompressedOutput.Store(dataStart + outPtr + i + 4, v1);
         }
     }
     GroupMemoryBarrierWithGroupSync();
