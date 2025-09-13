@@ -431,7 +431,7 @@ namespace Universe.Data.Chunk {
 		#endregion
 
 		#region Compression Management
-		
+
 		public async Task<bool> CompressChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
