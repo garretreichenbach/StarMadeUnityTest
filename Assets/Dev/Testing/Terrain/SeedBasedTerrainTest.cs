@@ -53,7 +53,7 @@ namespace Dev.Testing.Terrain {
 				ChunkLoaded = true,
 				UID = asteroidGo.name,
 			};
-			EntityDatabaseManager.Instance.InsertEntity(entity.Data);
+			EntityDatabaseManager.Instance.InsertEntity(entity);
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);

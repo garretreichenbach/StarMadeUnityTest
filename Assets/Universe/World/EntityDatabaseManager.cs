@@ -49,7 +49,7 @@ namespace Universe.World {
 
 		public static EntityDatabaseManager Instance { get; private set; }
 
-		static Dictionary<string, GameEntity.GameEntityData> _activeEntities;
+		static Dictionary<string, GameEntity> _activeEntities;
 
 		const string UniverseName = "world0"; //Todo: Make this based on the current universe being played
 
@@ -60,13 +60,13 @@ namespace Universe.World {
 				Destroy(this);
 			} else {
 				Instance = this;
-				_activeEntities = new Dictionary<string, GameEntity.GameEntityData>();
+				_activeEntities = new Dictionary<string, GameEntity>();
 				InitDB();
 			}
 		}
 
 		/**
-		* Initializes the LiteDB database connection and sets up necessary collections and indexes.
+		* Initializes the database connection and sets up necessary collections and indexes.
 		*/
 		void InitDB() {
 			var folderPath = System.IO.Path.Combine(Application.persistentDataPath, "Database");
@@ -102,8 +102,8 @@ namespace Universe.World {
 				throw new System.Exception($"Failed to create entity of type {data.EntityType} for entity ID {data.UID}");
 			}
 			entityComp.Data = data;
-			// entityObj.SetActive(true);
-			_activeEntities[data.UID] = data;
+			entityObj.SetActive(true);
+			_activeEntities[data.UID].Data = data;
 			entityComp.Data = data;
 			if(loadPhysical) {
 				_ = entityComp.LoadChunkData();
@@ -117,24 +117,23 @@ namespace Universe.World {
 		*/
 		public Task UnloadEntity(string entityUID, bool unloadPhysicalOnly = false) {
 			if(_activeEntities.ContainsKey(entityUID)) {
-				GameEntity.GameEntityData data = _activeEntities[entityUID];
-				if(data.ChunkLoaded) {
-					GameEntity entityComp = GetLoadedEntityFromUID(entityUID);
-					if(entityComp != null) {
-						_ = entityComp.WriteChunkData();
-						data.ChunkLoaded = false;
+				GameEntity entity = _activeEntities[entityUID];
+				if(entity.ChunkLoaded) {
+					if(entity != null) {
+						_ = entity.WriteChunkData();
+						entity.ChunkLoaded = false;
 					} else {
 						Debug.LogWarning($"Entity {entityUID} is marked as loaded but could not find the component in the scene.");
 					}
 					if(unloadPhysicalOnly) {
-						entityComp.RebuildMesh();
-						// entityComp.gameObject.SetActive(false);
+						entity.RebuildMesh();
+						entity.gameObject.SetActive(false);
 					} else {
-						Destroy(entityComp.gameObject);
+						Destroy(entity.gameObject);
 						_activeEntities.Remove(entityUID);
 					}
 				}
-				_db.Update(data);
+				_db.Update(entity.Data);
 				_db.Commit();
 			} else {
 				Debug.LogWarning($"Entity ID {entityUID} not found in active entities.");
@@ -197,11 +196,11 @@ namespace Universe.World {
 		/**
 		* Adds a new entity to the database if it doesn't already exist.
 		*/
-		public void InsertEntity(GameEntity.GameEntityData data) {
-			_db.Insert(data);
+		public void InsertEntity(GameEntity data) {
+			_db.Insert(data.Data);
 			_db.Commit();
 			_activeEntities.Add(data.UID, data);
-			Debug.Log($"Inserted entity {data.EntityName} with UID {data.UID} into database.");
+			Debug.Log($"Inserted entity {data.Name} with UID {data.UID} into database.");
 		}
 
 		void OnDestroy() {

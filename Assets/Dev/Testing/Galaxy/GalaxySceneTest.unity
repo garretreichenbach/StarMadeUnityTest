@@ -441,7 +441,7 @@ MonoBehaviour:
     noiseFrequency: 0.035
     surfaceThickness: 10
     shapeDistortion: 10
-  generateTestAsteroid: 0
+  generateTestAsteroid: 1
 --- !u!1 &961739749
 GameObject:
   m_ObjectHideFlags: 0
