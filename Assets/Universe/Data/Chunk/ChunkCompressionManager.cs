@@ -10,7 +10,8 @@ namespace Universe.Data.Chunk {
 
 	/**
 	* Manages GPU-based compression and decompression of chunk data using compute shaders.
-	* `	Uses AsyncGPUReadback for efficient data transfer between CPU and GPU.
+	* Uses AsyncGPUReadback for efficient data transfer between CPU and GPU.
+	 * Todo: Implement processing for multiple chunks per batch so we can better utilize the GPU.
 	*/
 	public class ChunkCompressionManager : MonoBehaviour {
 
