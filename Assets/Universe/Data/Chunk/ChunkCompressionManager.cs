@@ -49,7 +49,8 @@ namespace Universe.Data.Chunk {
 
 		class BufferSet {
 			public ComputeBuffer Input;
-			public ComputeBuffer Output;
+			public ComputeBuffer CompressionOutput;
+			public ComputeBuffer DecompressionOutput;
 			public ComputeBuffer Metadata;
 		}
 
@@ -64,7 +65,8 @@ namespace Universe.Data.Chunk {
 			for(int i = 0; i < bufferPoolSize; i++) {
 				_bufferPool[i] = new BufferSet {
 					Input = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
-					Output = new ComputeBuffer(32 * 32 * 32 * 2, sizeof(int)),
+					CompressionOutput = new ComputeBuffer(32 * 32 * 32 * 2, sizeof(int)),
+					DecompressionOutput = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
 					Metadata = new ComputeBuffer(4, sizeof(uint)),
 				};
 				_availableBuffers.Enqueue(i);
@@ -115,7 +117,7 @@ namespace Universe.Data.Chunk {
 				// Clear output and metadata buffers
 				const int maxOutputInts = 32 * 32 * 32 * 2; // Worst case: no compression
 				int[] zeroOutput = new int[maxOutputInts];
-				buffers.Output.SetData(zeroOutput);
+				buffers.CompressionOutput.SetData(zeroOutput);
 				uint[] zeroMeta = new uint[4];
 				buffers.Metadata.SetData(zeroMeta);
 
@@ -129,7 +131,7 @@ namespace Universe.Data.Chunk {
 					attempt++;
 					int kernel = CompressionShader.FindKernel("CSMain");
 					CompressionShader.SetBuffer(kernel, ChunkInput, buffers.Input);
-					CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, buffers.Output);
+					CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, buffers.CompressionOutput);
 					CompressionShader.SetBuffer(kernel, ChunkMetadata, buffers.Metadata);
 					CompressionShader.Dispatch(kernel, 1, 1, 1);
 
@@ -160,7 +162,7 @@ namespace Universe.Data.Chunk {
 					totalCompressedBytes = checked(compressedPayloadSize + offsetTableBytes);
 
 					// Read back output buffer
-					AsyncGPUReadbackRequest dataRequest = AsyncGPUReadback.Request(buffers.Output);
+					AsyncGPUReadbackRequest dataRequest = AsyncGPUReadback.Request(buffers.CompressionOutput);
 					while(!dataRequest.done) {
 						if(dataRequest.hasError) break;
 						await Task.Yield();
@@ -268,131 +270,139 @@ namespace Universe.Data.Chunk {
 		* Note: This should only be called by ChunkMemoryManager. If you need to decompress a chunk, use MemoryManager.DecompressChunk() instead.
 		*/
 		public async Task DecompressChunk(long chunkID) {
-			// Get allocation and header
-			if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
-				throw new Exception($"Chunk allocation not found for {chunkID}");
-			}
-			if(!MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
-				throw new Exception($"Chunk header not found for {chunkID}");
-			}
-			if(alloc.State != ChunkMemoryManager.ChunkState.Compressed) {
-				throw new Exception($"Chunk {chunkID} is not in compressed state");
-			}
+			var sw = System.Diagnostics.Stopwatch.StartNew();
+			int bufferIdx = AcquireBufferSet();
+			var buffers = _bufferPool[bufferIdx];
+			try {
+				// Get allocation and header
+				if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
+					throw new Exception($"Chunk allocation not found for {chunkID}");
+				}
+				if(!MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+					throw new Exception($"Chunk header not found for {chunkID}");
+				}
+				if(alloc.State != ChunkMemoryManager.ChunkState.Compressed) {
+					throw new Exception($"Chunk {chunkID} is not in compressed state");
+				}
 
-			int compressedOffset = alloc.CompressedOffset;
-			int compressedSize = alloc.CompressedSize;
-			int originalSize = header.OriginalSize;
+				int compressedOffset = alloc.CompressedOffset;
+				int compressedSize = alloc.CompressedSize;
+				int originalSize = header.OriginalSize;
 
-			// Allocate uncompressed slot
-			if(MemoryManager._freeUncompressedSlots.Count == 0)
-				throw new Exception("No free uncompressed slots available for decompression");
-			int poolIndex = MemoryManager._freeUncompressedSlots.Dequeue();
+				// Allocate uncompressed slot
+				if(MemoryManager._freeUncompressedSlots.Count == 0)
+					throw new Exception("No free uncompressed slots available for decompression");
+				int poolIndex = MemoryManager._freeUncompressedSlots.Dequeue();
 
-			// Prepare compressed input buffer (with offset table at start)
-			byte[] compressedData = new byte[compressedSize];
-			var pool = MemoryManager._compressedPool;
-			for(int i = 0; i < compressedSize; i++) {
-				compressedData[i] = pool[compressedOffset + i];
-			}
-			// Upload to GPU
-			// Use a raw (byte-addressable) buffer because the decompressor expects a ByteAddressBuffer
-			using ComputeBuffer gpuCompressedBuffer = new ComputeBuffer((compressedSize + 3) / 4, sizeof(int), ComputeBufferType.Raw);
-			int[] compressedInts = new int[(compressedSize + 3) / 4];
-			Buffer.BlockCopy(compressedData, 0, compressedInts, 0, compressedSize);
-			gpuCompressedBuffer.SetData(compressedInts);
+				// Prepare compressed input buffer (with offset table at start)
+				byte[] compressedData = new byte[compressedSize];
+				var pool = MemoryManager._compressedPool;
+				for(int i = 0; i < compressedSize; i++) {
+					compressedData[i] = pool[compressedOffset + i];
+				}
+				// Upload to GPU
+				int[] compressedInts = new int[(compressedSize + 3) / 4];
+				Buffer.BlockCopy(compressedData, 0, compressedInts, 0, compressedSize);
+				buffers.Input.SetData(compressedInts);
 
-			// Prepare output buffer (for decompressed ints)
-			using ComputeBuffer gpuOutputBuffer = new ComputeBuffer(32 * 32 * 32, sizeof(int));
-			// Prepare metadata buffer
-			using ComputeBuffer gpuMetadataBuffer = new ComputeBuffer(2, sizeof(uint));
-			int offsetTableBytes = 32 * 32 * 4; // COLUMN_COUNT * 4
-			if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
-			int payloadSize = (compressedSize - offsetTableBytes);
-			// ChunkMetadata[0] expects the payload size (bytes after offset table)
-			uint[] meta = { (uint)payloadSize, (uint)originalSize };
-			gpuMetadataBuffer.SetData(meta);
+				// Prepare output buffer (for decompressed ints)
+				// (already allocated in buffer pool)
+				// Prepare metadata buffer
+				int offsetTableBytes = 32 * 32 * 4; // COLUMN_COUNT * 4
+				if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
+				int payloadSize = (compressedSize - offsetTableBytes);
+				uint[] meta = { (uint)payloadSize, (uint)originalSize };
+				buffers.Metadata.SetData(meta);
 
-			// Dispatch decompression compute shader
-			ComputeShader decompressionShader = MemoryManager.decompressionShader;
-			int kernel = decompressionShader.FindKernel("CSMain");
-			decompressionShader.SetBuffer(kernel, CompressedInput, gpuCompressedBuffer);
-			decompressionShader.SetBuffer(kernel, ChunkOutput, gpuOutputBuffer);
-			decompressionShader.SetBuffer(kernel, ChunkMetadata, gpuMetadataBuffer);
-			// See note above: use a single group so the shader runs 32x32 threads as intended.
-			decompressionShader.Dispatch(kernel, 1, 1, 1);
+				// Dispatch decompression compute shader
+				ComputeShader decompressionShader = MemoryManager.decompressionShader;
+				int kernel = decompressionShader.FindKernel("CSMain");
+				decompressionShader.SetBuffer(kernel, CompressedInput, buffers.Input);
+				decompressionShader.SetBuffer(kernel, ChunkOutput, buffers.DecompressionOutput);
+				decompressionShader.SetBuffer(kernel, ChunkMetadata, buffers.Metadata);
+				decompressionShader.Dispatch(kernel, 1, 1, 1);
 
-			// Read back decompressed data with timeout
-			AsyncGPUReadbackRequest readback = AsyncGPUReadback.Request(gpuOutputBuffer);
-			float startTime = Time.realtimeSinceStartup;
-			float timeout = 5.0f; // 5 seconds max for GPU readback
-			while(!readback.done) {
+				// Read back decompressed data with timeout
+				AsyncGPUReadbackRequest readback = AsyncGPUReadback.Request(buffers.DecompressionOutput);
+				float startTime = Time.realtimeSinceStartup;
+				float timeout = 5.0f; // 5 seconds max for GPU readback
+				while(!readback.done) {
+					if(readback.hasError) {
+						Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID}");
+						throw new Exception("GPU readback error (decompression)");
+					}
+					if(Time.realtimeSinceStartup - startTime > timeout) {
+						Debug.LogError($"[DecompressChunk] GPU readback timed out for chunk {chunkID}");
+						throw new Exception("GPU readback timed out");
+					}
+					await Task.Yield();
+				}
 				if(readback.hasError) {
-					Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID}");
+					Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID} (after done)");
 					throw new Exception("GPU readback error (decompression)");
 				}
-				if(Time.realtimeSinceStartup - startTime > timeout) {
-					Debug.LogError($"[DecompressChunk] GPU readback timed out for chunk {chunkID}");
-					throw new Exception("GPU readback timed out");
+				int[] decompressedInts = readback.GetData<int>().ToArray();
+				if(decompressedInts.Length != 32 * 32 * 32) {
+					Debug.LogError($"[DecompressChunk] Decompressed data size mismatch: {decompressedInts.Length} for chunk {chunkID}");
+					throw new Exception($"Decompressed data size mismatch: {decompressedInts.Length}");
 				}
-				await Task.Yield();
-			}
-			if(readback.hasError) {
-				Debug.LogError($"[DecompressChunk] GPU readback error (decompression) for chunk {chunkID} (after done)");
-				throw new Exception("GPU readback error (decompression)");
-			}
-			int[] decompressedInts = readback.GetData<int>().ToArray();
-			if(decompressedInts.Length != 32 * 32 * 32) {
-				Debug.LogError($"[DecompressChunk] Decompressed data size mismatch: {decompressedInts.Length} for chunk {chunkID}");
-				throw new Exception($"Decompressed data size mismatch: {decompressedInts.Length}");
-			}
 
-			int offsetTableBytesCheck = 32 * 32 * 4;
-			if(compressedData.Length < offsetTableBytesCheck) {
-				Debug.LogError($"[DecompressChunk] Compressed data is smaller than offset table: {compressedData.Length} < {offsetTableBytesCheck}");
-				throw new Exception("Compressed data too small for offset table");
-			}
-			int columnCount = 32 * 32;
-			payloadSize = compressedData.Length - offsetTableBytesCheck;
-			uint[] offsets = new uint[columnCount];
-			for(int i = 0; i < columnCount; ++i) {
-				int idx = i * 4;
-				if(idx + 4 <= compressedData.Length) offsets[i] = BitConverter.ToUInt32(compressedData, idx);
-				else offsets[i] = (uint)payloadSize; // defensive
-			}
-			// Check monotonicity and bounds; be tolerant and clamp small errors instead of failing hard
-			for(int i = 0; i < columnCount; ++i) {
-				uint o = offsets[i];
-				if(o > payloadSize) {
-					// If offset is only slightly past the payload (e.g. by alignment), clamp and warn
-					Debug.LogWarning($"[DecompressChunk] Offset[{i}]={o} > payloadSize={payloadSize}, clamping to payloadSize");
-					offsets[i] = (uint)payloadSize;
-					o = offsets[i];
+				int offsetTableBytesCheck = 32 * 32 * 4;
+				if(compressedData.Length < offsetTableBytesCheck) {
+					Debug.LogError($"[DecompressChunk] Compressed data is smaller than offset table: {compressedData.Length} < {offsetTableBytesCheck}");
+					throw new Exception("Compressed data too small for offset table");
 				}
-				if(i > 0 && offsets[i] < offsets[i - 1]) {
-					// Fix minor non-monotonicity by forcing non-decreasing offsets; log for diagnosis
-					Debug.LogWarning($"[DecompressChunk] Offset table not monotonic at i={i}: prev={offsets[i - 1]} cur={offsets[i]}, fixing by setting to prev");
-					offsets[i] = offsets[i - 1];
+				int columnCount = 32 * 32;
+				payloadSize = compressedData.Length - offsetTableBytesCheck;
+				uint[] offsets = new uint[columnCount];
+				for(int i = 0; i < columnCount; ++i) {
+					int idx = i * 4;
+					if(idx + 4 <= compressedData.Length) offsets[i] = BitConverter.ToUInt32(compressedData, idx);
+					else offsets[i] = (uint)payloadSize; // defensive
 				}
+				// Check monotonicity and bounds; be tolerant and clamp small errors instead of failing hard
+				for(int i = 0; i < columnCount; ++i) {
+					uint o = offsets[i];
+					if(o > payloadSize) {
+						// If offset is only slightly past the payload (e.g. by alignment), clamp and warn
+						Debug.LogWarning($"[DecompressChunk] Offset[{i}]={o} > payloadSize={payloadSize}, clamping to payloadSize");
+						offsets[i] = (uint)payloadSize;
+						o = offsets[i];
+					}
+					if(i > 0 && offsets[i] < offsets[i - 1]) {
+						// Fix minor non-monotonicity by forcing non-decreasing offsets; log for diagnosis
+						Debug.LogWarning($"[DecompressChunk] Offset table not monotonic at i={i}: prev={offsets[i - 1]} cur={offsets[i]}, fixing by setting to prev");
+						offsets[i] = offsets[i - 1];
+					}
+				}
+
+				// Write to uncompressed pool
+				int startIndex = poolIndex * 32 * 32 * 32;
+				var uncompressedPool = MemoryManager._uncompressedPool;
+				for(int i = 0; i < decompressedInts.Length; i++) {
+					uncompressedPool[startIndex + i] = decompressedInts[i];
+				}
+
+				// Update allocation and header
+				alloc.PoolIndex = poolIndex;
+				alloc.CompressedOffset = -1;
+				alloc.CompressedSize = 0;
+				alloc.State = ChunkMemoryManager.ChunkState.Uncompressed;
+				MemoryManager._allocations[chunkID] = alloc;
+
+				header.State = ChunkMemoryManager.ChunkState.Uncompressed;
+				header.CompressedSize = 0;
+				header.IsDirty = false;
+				MemoryManager._headers[chunkID] = header;
+
+				sw.Stop();
+				if(sw.ElapsedMilliseconds > 100) {
+					Debug.LogWarning($"[DecompressChunk] chunkID={chunkID} took {sw.ElapsedMilliseconds} ms");
+				}
+			} finally {
+				ReleaseBufferSet(bufferIdx);
 			}
-
-			// Write to uncompressed pool
-			int startIndex = poolIndex * 32 * 32 * 32;
-			var uncompressedPool = MemoryManager._uncompressedPool;
-			for(int i = 0; i < decompressedInts.Length; i++) {
-				uncompressedPool[startIndex + i] = decompressedInts[i];
-			}
-
-			// Update allocation and header
-			alloc.PoolIndex = poolIndex;
-			alloc.CompressedOffset = -1;
-			alloc.CompressedSize = 0;
-			alloc.State = ChunkMemoryManager.ChunkState.Uncompressed;
-			MemoryManager._allocations[chunkID] = alloc;
-
-			header.State = ChunkMemoryManager.ChunkState.Uncompressed;
-			header.CompressedSize = 0;
-			header.IsDirty = false;
-			MemoryManager._headers[chunkID] = header;
 		}
 	}
 }
+
