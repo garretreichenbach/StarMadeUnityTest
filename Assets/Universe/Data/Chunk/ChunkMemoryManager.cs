@@ -171,19 +171,6 @@ namespace Universe.Data.Chunk {
 
 		public static ChunkMemoryManager Instance { get; private set; }
 
-		void Awake() {
-			if(Instance != null) {
-				Debug.LogError("Multiple ChunkMemoryManager instances found!");
-				Destroy(gameObject);
-				return;
-			}
-			Instance = this;
-			InitializeMemoryPools();
-			InitializeGPUResources();
-			// Initialize GPU mutex
-			_gpuMutex = new SemaphoreSlim(1, 1);
-		}
-
 		void InitializeMemoryPools() {
 			// Allocate main uncompressed pool
 			int totalUncompressedInts = maxUncompressedChunks * BlocksPerChunk;
@@ -438,7 +425,6 @@ namespace Universe.Data.Chunk {
 				return false;
 			}
 
-			// Mark as being compressed
 			allocation.State = ChunkState.GPUCompressing;
 			_allocations[chunkID] = allocation;
 
@@ -451,14 +437,14 @@ namespace Universe.Data.Chunk {
 
 			_activeOperations[chunkID] = operation;
 
-			// Use GPUCompressionManager for actual compression
 			ChunkCompressionManager compressionManager = CompressionManager;
 			if(compressionManager != null) {
 				try {
-					// Ensure only one GPU compression/decompression runs at a time
 					await _gpuMutex.WaitAsync();
+					var sw = System.Diagnostics.Stopwatch.StartNew();
 					try {
 						await compressionManager.CompressChunk(chunkID);
+						sw.Stop();
 						operation.CompletionSource.SetResult(true);
 					} finally {
 						_gpuMutex.Release();
@@ -488,7 +474,6 @@ namespace Universe.Data.Chunk {
 				return false; // Can only decompress compressed chunks
 			}
 			// Do NOT set state to GPUDecompressing here!
-			Debug.Log($"[DecompressChunk] Chunk {chunkID} calling compressionManager.DecompressChunk");
 			CompressionOperation operation = new CompressionOperation {
 				ChunkID = chunkID,
 				TargetState = ChunkState.Uncompressed,
@@ -506,7 +491,6 @@ namespace Universe.Data.Chunk {
 						// After decompression, verify state
 						allocation = _allocations[chunkID];
 						if(allocation.State == ChunkState.Uncompressed) {
-							Debug.Log($"[DecompressChunk] Chunk {chunkID} successfully decompressed and state set to Uncompressed");
 							operation.CompletionSource.SetResult(true);
 						} else {
 							Debug.LogError($"Chunk {chunkID} state invalid after decompression: {allocation.State}");
@@ -644,10 +628,6 @@ namespace Universe.Data.Chunk {
 					if(decompressed) {
 						if(_allocations.TryGetValue(chunkID, out var alloc) && alloc.PoolIndex >= 0 && chunkIndex >= 0 && chunkIndex < gameEntity.Chunks.Length) {
 							gameEntity.Chunks[chunkIndex] = new ChunkData(chunkID, alloc.PoolIndex);
-							// Log chunk assignment and first 8 block types
-							int[] blockData = _uncompressedPool.GetSubArray(alloc.PoolIndex * 32 * 32 * 32, 8).ToArray();
-							string blockPreview = string.Join(", ", blockData);
-							Debug.Log($"[DecompressEntity] Assigned chunkID={chunkID} to index={chunkIndex}, first 8 block types: [{blockPreview}]");
 						}
 					} else {
 						Debug.LogError($"Failed to decompress chunk {chunkID} for entity {gameEntity.Name}");
@@ -788,6 +768,17 @@ namespace Universe.Data.Chunk {
 		#region Debug and Statistics
 
 		void Start() {
+			if(Instance != null) {
+				Debug.LogError("Multiple ChunkMemoryManager instances found!");
+				Destroy(gameObject);
+				return;
+			}
+			Instance = this;
+			InitializeMemoryPools();
+			InitializeGPUResources();
+			// Initialize GPU mutex for parallelism (match buffer pool size)
+			_gpuMutex = new SemaphoreSlim(EngineSettings.Instance.GPUCompressionBufferPoolSize.Value);
+
 			StatsDisplay statsDisplay = FindFirstObjectByType<StatsDisplay>();
 			if(statsDisplay != null) {
 				statsDisplay.Reporters.Add(this);
@@ -848,7 +839,7 @@ namespace Universe.Data.Chunk {
 
 			// Ensure state is compressed
 			if(!_allocations.TryGetValue(chunkID, out alloc) || alloc.State != ChunkState.Compressed) {
-				Debug.LogError($"[TestCompressionRoundTrip] Chunk {chunkID} not in compressed state after compression (state={( _allocations.TryGetValue(chunkID, out alloc) ? alloc.State.ToString() : "missing")})");
+				Debug.LogError($"[TestCompressionRoundTrip] Chunk {chunkID} not in compressed state after compression (state={(_allocations.TryGetValue(chunkID, out alloc) ? alloc.State.ToString() : "missing")})");
 				return false;
 			}
 

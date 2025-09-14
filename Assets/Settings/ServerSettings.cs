@@ -36,7 +36,7 @@ namespace Settings {
 
 		public static ServerSettings Instance { get; private set; }
 
-		void Start() {
+		void Awake() {
 			Instance = this;
 			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
 				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));

@@ -17,15 +17,19 @@ namespace Settings {
 		[Header("Performance Settings")]
 		[InspectorLabel("GPU Readback Timeout")]
 		[Tooltip("Maximum time in seconds to wait for GPU readback to complete before timing out.")]
-		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout", "Maximum time in seconds to wait for GPU readback to complete before timing out.", 10.0f, 1.0f, 30.0f, true);
+		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout", "Maximum time in seconds to wait for GPU readback to complete before timing out.", 50.0f, 1.0f, 30.0f, true);
 
 		[InspectorLabel("Max Chunk Operation Wait Time")]
 		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
-		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 30.0f, 1.0f, 60.0f, true);
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 1.0f, 30.0f, true);
 
 		[InspectorLabel("Max Entity Rebuilds Per Frame")]
 		[Tooltip("Maximum number of entity mesh rebuilds to perform per frame.")]
 		public IntSettingsValue MaxEntityRebuildsPerFrame = new IntSettingsValue("Max Entity Rebuilds Per Frame", "Maximum number of entity mesh rebuilds to perform per frame.", 5, 1, 10);
+
+		[InspectorLabel("GPU Compression Buffer Pool Size")]
+		[Tooltip("Number of buffers to allocate for GPU compression tasks.")]
+		public IntOptionsSettingsValue GPUCompressionBufferPoolSize = new IntOptionsSettingsValue("GPU Compression Buffer Pool Size", "Number of buffers to allocate for GPU compression tasks.", 4, new[] { 1, 2, 4, 8, 16 });
 
 		#endregion
 
@@ -84,7 +88,8 @@ namespace Settings {
 
 		public static EngineSettings Instance { get; private set; }
 
-		void Start() {
+		void Awake() {
+			//Todo: Dont call this in awake, we need a proper initialization order
 			Instance = this;
 			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
 				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
@@ -133,6 +138,7 @@ namespace Settings {
 				FPSLimit = FPSLimit.Value,
 				VSyncMode = VSyncMode.Value,
 				StatsOverlayMode = StatsOverlayMode.Value,
+				GPUCompressionBufferPoolSize = GPUCompressionBufferPoolSize.Value,
 			};
 		}
 
@@ -145,6 +151,7 @@ namespace Settings {
 			if(dict.ContainsKey("FPSLimit")) FPSLimit.SetValue(Convert.ToInt32(dict["FPSLimit"]));
 			if(dict.ContainsKey("VSyncMode")) VSyncMode.SetValue(Convert.ToInt32(dict["VSyncMode"]));
 			if(dict.ContainsKey("StatsOverlayMode")) StatsOverlayMode.SetValue((StatsDisplay.DisplayMode)Enum.Parse(typeof(StatsDisplay.DisplayMode), dict["StatsOverlayMode"].ToString()));
+			if(dict.ContainsKey("GPUCompressionBufferPoolSize")) GPUCompressionBufferPoolSize.SetValue(Convert.ToInt32(dict["GPUCompressionBufferPoolSize"]));
 		}
 
 		/**

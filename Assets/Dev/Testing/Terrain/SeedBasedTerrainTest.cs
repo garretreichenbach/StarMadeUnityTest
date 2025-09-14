@@ -20,26 +20,6 @@ namespace Dev.Testing.Terrain {
 		[Header("Test Controls")]
 		public bool generateTestAsteroid;
 
-		void Start() {
-			if(ChunkMemoryManager.Instance == null) {
-				Debug.LogError("GlobalChunkMemoryManager not found! Make sure it's in the scene.");
-				return;
-			}
-			asteroidSettings ??= AsteroidGenerationSettings.CreateDefault(chunkDimensions);
-		}
-
-		/*void OnDestroy() {
-			// Clean up any chunks we allocated
-			var asteroids = FindObjectsByType<GameEntity>(FindObjectsSortMode.None);
-			foreach(GameEntity entity in asteroids) {
-				if(entity.Chunks != null) {
-					for(int i = 0; i < entity.Chunks.Length; i++) {
-						ChunkMemoryManager.Instance?.DeallocateChunk(entity.Chunks[i]._chunkID);
-					}
-				}
-			}
-		}*/
-
 		void GenerateTestAsteroid() {
 			GameObject asteroidGo = new GameObject($"Entity_Asteroid_{System.Guid.NewGuid()}");
 			Asteroid entity = asteroidGo.AddComponent<Asteroid>();
