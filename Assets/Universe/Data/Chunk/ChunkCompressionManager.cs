@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Buffers;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -18,8 +17,6 @@ namespace Universe.Data.Chunk {
 		static readonly int ChunkMetadata = Shader.PropertyToID("ChunkMetadata");
 		static readonly int ChunkInput = Shader.PropertyToID("ChunkInput");
 		static readonly int ChunkCompressedOutput = Shader.PropertyToID("ChunkCompressedOutput");
-		static readonly int ChunkBaseBytesID = Shader.PropertyToID("ChunkBaseBytes");
-		static readonly int GlobalCompressedOutputID = Shader.PropertyToID("GlobalCompressedOutput");
 
 		// Reference to the memory manager and its GPU resources
 		ChunkMemoryManager MemoryManager { get => ChunkMemoryManager.Instance; }
@@ -31,339 +28,122 @@ namespace Universe.Data.Chunk {
 
 		public static ChunkCompressionManager Instance => FindFirstObjectByType<ChunkCompressionManager>();
 
-		// Simple reusable compute buffer pool to reduce per-batch allocations
-		readonly object _bufferPoolLock = new object();
-		System.Collections.Generic.List<ComputeBuffer> _bufferPool = new System.Collections.Generic.List<ComputeBuffer>();
-
-		ComputeBuffer RentComputeBuffer(int count, int stride, ComputeBufferType type = ComputeBufferType.Default) {
-			lock(_bufferPoolLock) {
-				for(int i = 0; i < _bufferPool.Count; ++i) {
-					var b = _bufferPool[i];
-					if(b != null && b.count == count && b.stride == stride) {
-						_bufferPool.RemoveAt(i);
-						return b;
-					}
-				}
-			}
-			// Not found -> allocate
-			return new ComputeBuffer(count, stride, type);
-		}
-
-		void ReturnComputeBuffer(ComputeBuffer buf) {
-			if(buf == null) return;
-			lock(_bufferPoolLock) {
-				_bufferPool.Add(buf);
-			}
-		}
-
-		void OnDestroy() {
-			// Dispose pooled buffers
-			lock(_bufferPoolLock) {
-				foreach(var b in _bufferPool) b.Dispose();
-				_bufferPool.Clear();
-			}
-		}
-
 		/**
-		* Compress a single chunk (wrapper around CompressChunk internal flow).
-		*/
+		 * Compress a single chunk (wrapper around CompressChunk internal flow).
+		 */
 		public async Task<ChunkMemoryManager.CompressedChunk> CompressChunk(long chunkID) {
-			// Use two-pass shader: CSComputeSizes -> CSWritePayloads
-			int intsPerChunk = 32 * 32 * 32;
+			// Use the single-chunk path
+			// Get raw chunk data
 			int[] rawData = MemoryManager.GetRawDataArray(chunkID);
-			if(rawData == null || rawData.Length != intsPerChunk) throw new Exception($"Invalid chunk data for {chunkID}");
+			if(rawData == null || rawData.Length != 32 * 32 * 32) {
+				throw new Exception($"Invalid chunk data for {chunkID}");
+			}
 
-			// Upload input (single chunk occupies first slot)
-			GpuInputBuffer.SetData(rawData, 0, 0, intsPerChunk);
+			// Upload input
+			GpuInputBuffer.SetData(rawData);
 
-			// Zero metadata before sizes pass
-			int[] zeroMeta = new int[2];
+			// Zero out metadata and output before dispatch
+			int maxOutputInts = 32 * 32 * 32 * 2; // conservative
+			int[] zeroOutput = new int[maxOutputInts];
+			GpuOutputBuffer.SetData(zeroOutput);
+			uint[] zeroMeta = new uint[4];
 			GpuMetadataBuffer.SetData(zeroMeta);
 
-			// Dispatch sizes kernel
-			int kernelSizes;
-			try {
-				kernelSizes = CompressionShader.FindKernel("CSComputeSizes");
-			} catch(Exception ex) {
-				throw new Exception($"Compression shader missing kernel 'CSComputeSizes'. Ensure the assigned compute shader is the compressor (ChunkCompressor.compute). Shader: {CompressionShader?.name}", ex);
-			}
-			CompressionShader.SetBuffer(kernelSizes, ChunkInput, GpuInputBuffer);
-			CompressionShader.SetBuffer(kernelSizes, ChunkMetadata, GpuMetadataBuffer);
-			CompressionShader.Dispatch(kernelSizes, 1, 1, 1);
+			// Dispatch compression shader (single group)
+			int kernel = CompressionShader.FindKernel("CSMain");
+			CompressionShader.SetBuffer(kernel, ChunkInput, GpuInputBuffer);
+			CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, GpuOutputBuffer);
+			CompressionShader.SetBuffer(kernel, ChunkMetadata, GpuMetadataBuffer);
+			CompressionShader.Dispatch(kernel, 1, 1, 1);
 
-			// Read back metadata (payload size, original size)
-			var metaTcs = new TaskCompletionSource<int[]>();
-			AsyncGPUReadback.Request(GpuMetadataBuffer,
-				req => {
-					if(req.hasError) metaTcs.TrySetException(new Exception("GPU metadata readback error"));
-					else metaTcs.TrySetResult(req.GetData<int>().ToArray());
-				});
-			int[] meta = await metaTcs.Task;
-			if(meta == null || meta.Length < 1) throw new Exception("GPU metadata readback returned no data");
-			int payloadSize = meta[0];
+			// Read back metadata
+			AsyncGPUReadbackRequest metaReq = AsyncGPUReadback.Request(GpuMetadataBuffer);
+			while(!metaReq.done) {
+				if(metaReq.hasError) throw new Exception("GPU metadata readback error");
+				await Task.Yield();
+			}
+			int[] meta = metaReq.GetData<int>().ToArray();
+			if(meta == null || meta.Length == 0) throw new Exception("GPU metadata readback returned no data");
+			int compressedPayloadSize = meta[0];
 			int offsetTableBytes = 32 * 32 * 4;
-			if(payloadSize < 0) throw new Exception($"Invalid compressed payload size from GPU: {payloadSize}");
-			int totalCompressedBytes = checked(payloadSize + offsetTableBytes);
+			if(compressedPayloadSize < 0) throw new Exception($"Invalid compressed payload size from GPU: {compressedPayloadSize}");
+			int totalCompressedBytes = checked(compressedPayloadSize + offsetTableBytes);
 
-			// Compute chunk base (single chunk -> base = 0) and upload ChunkBaseBytes buffer
-			ComputeBuffer chunkBaseBuf = new ComputeBuffer(1, sizeof(uint));
-			try {
-				uint[] bases = new uint[] { 0 };
-				chunkBaseBuf.SetData(bases);
-
-				// Ensure output buffer is zeroed for safety (only needed region)
-				int intsNeeded = (totalCompressedBytes + 3) / 4;
-				int[] zeroOut = ArrayPool<int>.Shared.Rent(intsNeeded);
-				try {
-					Array.Clear(zeroOut, 0, intsNeeded);
-					GpuOutputBuffer.SetData(zeroOut, 0, 0, intsNeeded);
-				} finally {
-					ArrayPool<int>.Shared.Return(zeroOut);
-				}
-
-				// Dispatch write kernel
-				int kernelWrite;
-				try {
-					kernelWrite = CompressionShader.FindKernel("CSWritePayloads");
-				} catch(Exception ex) {
-					throw new Exception($"Compression shader missing kernel 'CSWritePayloads'. Ensure the assigned compute shader is the compressor (ChunkCompressor.compute). Shader: {CompressionShader?.name}", ex);
-				}
-				CompressionShader.SetBuffer(kernelWrite, ChunkInput, GpuInputBuffer);
-				CompressionShader.SetBuffer(kernelWrite, ChunkBaseBytesID, chunkBaseBuf);
-				// Global output is the same GPUOutputBuffer (ByteAddressBuffer)
-				CompressionShader.SetBuffer(kernelWrite, GlobalCompressedOutputID, GpuOutputBuffer);
-				CompressionShader.SetBuffer(kernelWrite, ChunkMetadata, GpuMetadataBuffer);
-				CompressionShader.Dispatch(kernelWrite, 1, 1, 1);
-
-				// Read back the compacted output buffer
-				var dataTcs = new TaskCompletionSource<int[]>();
-				AsyncGPUReadback.Request(GpuOutputBuffer,
-					req => {
-						if(req.hasError) dataTcs.TrySetException(new Exception("GPU data readback error"));
-						else dataTcs.TrySetResult(req.GetData<int>().ToArray());
-					});
-
-				int[] compressedInts = await dataTcs.Task;
-				if(compressedInts == null) throw new Exception("GPU output readback returned no data");
-
-				int availableBytes = compressedInts.Length * sizeof(int);
-				if(totalCompressedBytes > availableBytes) throw new Exception($"Readback returned fewer bytes ({availableBytes}) than expected ({totalCompressedBytes})");
-
-				// Copy into rented byte buffer, then into compressed pool
-				var bytePool = ArrayPool<byte>.Shared;
-				byte[] compressedData = bytePool.Rent(totalCompressedBytes);
-				try {
-					Buffer.BlockCopy(compressedInts, 0, compressedData, 0, totalCompressedBytes);
-				} catch {
-					bytePool.Return(compressedData);
-					throw;
-				}
-
-				// Reserve space in compressed pool atomically and copy to NativeArray
-				int reservedOffset = Interlocked.Add(ref MemoryManager._compressedPoolHead, totalCompressedBytes) - totalCompressedBytes;
-				if(reservedOffset < 0) {
-					Interlocked.Exchange(ref MemoryManager._compressedPoolHead, 0);
-					bytePool.Return(compressedData);
-					throw new Exception("Compressed pool negative head after reservation");
-				}
-				if(reservedOffset + totalCompressedBytes > MemoryManager._compressedPool.Length) {
-					Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
-					bytePool.Return(compressedData);
-					throw new Exception("Compressed pool out of memory");
-				}
-				try {
-					for(int i = 0; i < totalCompressedBytes; ++i) MemoryManager._compressedPool[reservedOffset + i] = compressedData[i];
-				} catch(Exception ex) {
-					Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
-					ArrayPool<byte>.Shared.Return(compressedData);
-					throw new Exception($"Failed copying compressed data into pool: {ex.Message}");
-				} finally {
-					ArrayPool<byte>.Shared.Return(compressedData);
-				}
-
-				// Update allocation and header (same as previous behavior)
-				if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) throw new Exception($"Chunk allocation not found for {chunkID}");
-				alloc.CompressedOffset = reservedOffset;
-				alloc.CompressedSize = totalCompressedBytes;
-				alloc.State = ChunkMemoryManager.ChunkState.Compressed;
-				int oldPoolIndex = alloc.PoolIndex;
-				alloc.PoolIndex = -1;
-				MemoryManager._allocations[chunkID] = alloc;
-
-				if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
-					header.State = ChunkMemoryManager.ChunkState.Compressed;
-					header.CompressedSize = totalCompressedBytes;
-					header.IsDirty = false;
-					MemoryManager._headers[chunkID] = header;
-				} else {
-					throw new Exception($"Chunk header not found for {chunkID}");
-				}
-
-				if(oldPoolIndex >= 0) MemoryManager._freeUncompressedSlots.Enqueue(oldPoolIndex);
-
-				return new ChunkMemoryManager.CompressedChunk { ChunkID = chunkID, Offset = reservedOffset, Size = totalCompressedBytes };
-			} finally {
-				chunkBaseBuf.Dispose();
+			// Read back output buffer
+			AsyncGPUReadbackRequest dataReq = AsyncGPUReadback.Request(GpuOutputBuffer);
+			while(!dataReq.done) {
+				if(dataReq.hasError) throw new Exception("GPU data readback error");
+				await Task.Yield();
 			}
-		}
+			int[] compressedInts = dataReq.GetData<int>().ToArray();
+			int availableBytes = compressedInts.Length * sizeof(int);
+			if(totalCompressedBytes > availableBytes) throw new Exception($"Readback returned fewer bytes ({availableBytes}) than expected ({totalCompressedBytes})");
+			if(compressedInts.Length > (totalCompressedBytes + 3) / 4) Array.Resize(ref compressedInts, (totalCompressedBytes + 3) / 4);
+			byte[] compressedData = new byte[totalCompressedBytes];
+			Buffer.BlockCopy(compressedInts, 0, compressedData, 0, totalCompressedBytes);
 
-		/**
-		* Compress multiple chunks as a single GPU batch. The compressed blobs are enqueued
-		* back to the ChunkMemoryManager for throttled, main-thread commit. This method
-		* returns when the GPU readbacks have completed and the compressed blobs have been
-		* enqueued (not when they are committed into the compressed pool).
-		*/
-		public async Task CompressChunksAsync(long[] chunkIDs) {
-			if(chunkIDs == null || chunkIDs.Length == 0) return;
-			int batchLen = chunkIDs.Length;
-			int maxPerBatch = MemoryManager.CompressionBatchSize;
-			if(batchLen > maxPerBatch) throw new ArgumentException($"Batch length {batchLen} exceeds configured batch size {maxPerBatch}");
-
-			int intsPerChunk = 32 * 32 * 32;
-			int totalInts = intsPerChunk * batchLen;
-			int[] upload = ArrayPool<int>.Shared.Rent(totalInts);
-			try {
-				for(int i = 0; i < batchLen; ++i) {
-					long id = chunkIDs[i];
-					int[] raw = MemoryManager.GetRawDataArray(id);
-					if(raw == null || raw.Length != intsPerChunk) {
-						try {
-							MemoryManager.CompleteCompressionOperation(id, false, new Exception("Invalid chunk data for batch compression"));
-						} catch { }
-						Array.Clear(upload, i * intsPerChunk, intsPerChunk);
-						continue;
-					}
-					Buffer.BlockCopy(raw, 0, upload, i * intsPerChunk * sizeof(int), intsPerChunk * sizeof(int));
+			// Basic validation of offset table
+			int columnCount = 32 * 32;
+			int payloadSize = compressedData.Length - offsetTableBytes;
+			for(int i = 0; i < columnCount; ++i) {
+				int idx = i * 4;
+				if(idx + 4 > compressedData.Length) throw new Exception("Offset table truncated");
+				uint off = BitConverter.ToUInt32(compressedData, idx);
+				if(off > payloadSize) throw new Exception($"Invalid offset[{i}]={off} > payloadSize={payloadSize}");
+				if(i > 0) {
+					uint prev = BitConverter.ToUInt32(compressedData, (i - 1) * 4);
+					if(off < prev) throw new Exception($"Offset table not monotonic at i={i}: prev={prev} cur={off}");
 				}
-
-				// Upload input to GPU (batched)
-				GpuInputBuffer.SetData(upload, 0, 0, totalInts);
-
-				// Zero metadata before sizes pass
-				int[] zeroMeta = ArrayPool<int>.Shared.Rent(batchLen * 2);
-				try {
-					Array.Clear(zeroMeta, 0, batchLen * 2);
-					GpuMetadataBuffer.SetData(zeroMeta, 0, 0, batchLen * 2);
-				} finally {
-					ArrayPool<int>.Shared.Return(zeroMeta);
-				}
-
-				// Dispatch sizes kernel for the batch
-				int kernelSizes;
-				try {
-					kernelSizes = CompressionShader.FindKernel("CSComputeSizes");
-				} catch(Exception ex) {
-					throw new Exception($"Compression shader missing kernel 'CSComputeSizes' (batch). Ensure the assigned compute shader is the compressor (ChunkCompressor.compute). Shader: {CompressionShader?.name}", ex);
-				}
-				CompressionShader.SetBuffer(kernelSizes, ChunkInput, GpuInputBuffer);
-				CompressionShader.SetBuffer(kernelSizes, ChunkMetadata, GpuMetadataBuffer);
-				CompressionShader.Dispatch(kernelSizes, batchLen, 1, 1);
-
-				// Read back metadata (per-chunk payload sizes)
-				var metaTcs = new TaskCompletionSource<int[]>();
-				AsyncGPUReadback.Request(GpuMetadataBuffer,
-					req => {
-						if(req.hasError) metaTcs.TrySetException(new Exception("GPU metadata readback error (batch)"));
-						else metaTcs.TrySetResult(req.GetData<int>().ToArray());
-					});
-
-				int[] meta = await metaTcs.Task;
-				if(meta == null) throw new Exception("GPU metadata readback returned no data (batch)");
-
-				// Compute per-chunk base offsets (in bytes) and total size
-				int offsetTableBytes = 32 * 32 * 4;
-				uint[] bases = new uint[batchLen];
-				intCursor:
-				{ }
-				int totalBytes = 0;
-				for(int i = 0; i < batchLen; ++i) {
-					int payload = 0;
-					int metaIndex = i * 2;
-					if(metaIndex < meta.Length) payload = meta[metaIndex];
-					int chunkBytes = checked(payload + offsetTableBytes);
-					bases[i] = (uint)totalBytes;
-					totalBytes += chunkBytes;
-				}
-
-				// Upload chunk base buffer
-				ComputeBuffer chunkBaseBuf = new ComputeBuffer(batchLen, sizeof(uint));
-				try {
-					chunkBaseBuf.SetData(bases);
-
-					// Ensure output buffer region has zeros for safety (only needed region)
-					int intsNeeded = (totalBytes + 3) / 4;
-					int[] zeroOut = ArrayPool<int>.Shared.Rent(intsNeeded);
-					try {
-						Array.Clear(zeroOut, 0, intsNeeded);
-						GpuOutputBuffer.SetData(zeroOut, 0, 0, intsNeeded);
-					} finally {
-						ArrayPool<int>.Shared.Return(zeroOut);
-					}
-
-					// Dispatch write kernel to compact outputs into GpuOutputBuffer at bases
-					int kernelWrite;
-					try {
-						kernelWrite = CompressionShader.FindKernel("CSWritePayloads");
-					} catch(Exception ex) {
-						throw new Exception($"Compression shader missing kernel 'CSWritePayloads' (batch). Ensure the assigned compute shader is the compressor (ChunkCompressor.compute). Shader: {CompressionShader?.name}", ex);
-					}
-					CompressionShader.SetBuffer(kernelWrite, ChunkInput, GpuInputBuffer);
-					CompressionShader.SetBuffer(kernelWrite, ChunkBaseBytesID, chunkBaseBuf);
-					CompressionShader.SetBuffer(kernelWrite, ChunkMetadata, GpuMetadataBuffer);
-					CompressionShader.SetBuffer(kernelWrite, GlobalCompressedOutputID, GpuOutputBuffer);
-					CompressionShader.Dispatch(kernelWrite, batchLen, 1, 1);
-
-					// Read back the compacted output buffer
-					var dataTcs = new TaskCompletionSource<int[]>();
-					AsyncGPUReadback.Request(GpuOutputBuffer,
-						req => {
-							if(req.hasError) dataTcs.TrySetException(new Exception("GPU data readback error (batch)"));
-							else dataTcs.TrySetResult(req.GetData<int>().ToArray());
-						});
-
-					int[] compressedInts = await dataTcs.Task;
-					if(compressedInts == null) throw new Exception("GPU output readback returned no data (batch)");
-
-					// Slice per-chunk and enqueue compressed writes
-					int intCursor = 0; // pointer into compressedInts (in ints)
-					var bytePool = ArrayPool<byte>.Shared;
-					for(int i = 0; i < batchLen; ++i) {
-						long id = chunkIDs[i];
-						int payload = 0;
-						int metaIndex = i * 2;
-						if(metaIndex < meta.Length) payload = meta[metaIndex];
-						int totalB = checked(payload + offsetTableBytes);
-						int intsNeededChunk = (totalB + 3) / 4;
-						if(intCursor + intsNeededChunk > compressedInts.Length) {
-							try {
-								MemoryManager.CompleteCompressionOperation(id, false, new Exception("Compressed readback shorter than expected (batch)"));
-							} catch { }
-							break;
-						}
-						byte[] rented = bytePool.Rent(totalB);
-						try {
-							Buffer.BlockCopy(compressedInts, intCursor * sizeof(int), rented, 0, totalB);
-							MemoryManager.EnqueueCompressedWrite(id, rented, true);
-						} catch(Exception ex) {
-							bytePool.Return(rented);
-							try {
-								MemoryManager.CompleteCompressionOperation(id, false, ex);
-							} catch { }
-						}
-						intCursor += intsNeededChunk;
-					}
-				} finally {
-					chunkBaseBuf.Dispose();
-				}
-			} finally {
-				ArrayPool<int>.Shared.Return(upload);
 			}
+
+			// Reserve space in compressed pool atomically
+			int reservedOffset = Interlocked.Add(ref MemoryManager._compressedPoolHead, totalCompressedBytes) - totalCompressedBytes;
+			if(reservedOffset < 0) {
+				// should not happen, but protect
+				Interlocked.Exchange(ref MemoryManager._compressedPoolHead, 0);
+				throw new Exception("Compressed pool negative head after reservation");
+			}
+			if(reservedOffset + totalCompressedBytes > MemoryManager._compressedPool.Length) {
+				// rollback
+				Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
+				throw new Exception("Compressed pool out of memory");
+			}
+			// Copy into pool
+			try {
+				for(int i = 0; i < totalCompressedBytes; ++i) MemoryManager._compressedPool[reservedOffset + i] = compressedData[i];
+			} catch(Exception ex) {
+				// rollback
+				Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
+				throw new Exception($"Failed copying compressed data into pool: {ex.Message}");
+			}
+
+			// Update allocation and header
+			if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) throw new Exception($"Chunk allocation not found for {chunkID}");
+			alloc.CompressedOffset = reservedOffset;
+			alloc.CompressedSize = totalCompressedBytes;
+			alloc.State = ChunkMemoryManager.ChunkState.Compressed;
+			int oldPoolIndex = alloc.PoolIndex;
+			alloc.PoolIndex = -1;
+			MemoryManager._allocations[chunkID] = alloc;
+
+			if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+				header.State = ChunkMemoryManager.ChunkState.Compressed;
+				header.CompressedSize = totalCompressedBytes;
+				header.IsDirty = false;
+				MemoryManager._headers[chunkID] = header;
+			} else {
+				throw new Exception($"Chunk header not found for {chunkID}");
+			}
+
+			if(oldPoolIndex >= 0) MemoryManager._freeUncompressedSlots.Enqueue(oldPoolIndex);
+
+			return new ChunkMemoryManager.CompressedChunk { ChunkID = chunkID, Offset = reservedOffset, Size = totalCompressedBytes };
 		}
 
 		/**
 		* Decompress a chunk (single chunk path). Validates and writes back to uncompressed pool.
 		*/
-		public Task<ChunkMemoryManager.ChunkHeader> DecompressChunk(long chunkID, int poolIndex) {
+		public async Task<ChunkMemoryManager.ChunkHeader> DecompressChunk(long chunkID) {
 			// validate allocation & header
 			if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) throw new Exception($"Chunk allocation not found for {chunkID}");
 			if(!MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) throw new Exception($"Chunk header not found for {chunkID}");
@@ -375,148 +155,186 @@ namespace Universe.Data.Chunk {
 
 			if(compressedSize <= 0) throw new Exception("Invalid compressedSize in allocation");
 
-			// copy compressed bytes into rented buffer to avoid allocating
-			var compressedPool = ArrayPool<byte>.Shared;
-			byte[] compressedData = compressedPool.Rent(compressedSize);
+			// allocate uncompressed slot
+			if(MemoryManager._freeUncompressedSlots.Count == 0) throw new Exception("No free uncompressed slots available for decompression");
+			int poolIndex = MemoryManager._freeUncompressedSlots.Dequeue();
+
+			// copy compressed bytes into local array
+			byte[] compressedData = new byte[compressedSize];
 			for(int i = 0; i < compressedSize; ++i) compressedData[i] = MemoryManager._compressedPool[compressedOffset + i];
 
-			// Create int[] buffer rented from pool for upload
-			var intPool = ArrayPool<int>.Shared;
-			int[] compressedInts = intPool.Rent((compressedSize + 3) / 4);
-			Buffer.BlockCopy(compressedData, 0, compressedInts, 0, compressedSize);
-			ComputeBuffer gpuCompressedBuffer = new ComputeBuffer((compressedSize + 3) / 4, sizeof(int), ComputeBufferType.Raw);
-			gpuCompressedBuffer.SetData(compressedInts);
+			// upload to GPU
+			using(ComputeBuffer gpuCompressedBuffer = new ComputeBuffer((compressedSize + 3) / 4, sizeof(int), ComputeBufferType.Raw)) {
+				int[] compressedInts = new int[(compressedSize + 3) / 4];
+				Buffer.BlockCopy(compressedData, 0, compressedInts, 0, compressedSize);
+				gpuCompressedBuffer.SetData(compressedInts);
 
-			ComputeBuffer gpuOutputBuffer = new ComputeBuffer(32 * 32 * 32, sizeof(int));
-			ComputeBuffer gpuMetadataBuffer = new ComputeBuffer(2, sizeof(uint));
-			int offsetTableBytes = 32 * 32 * 4;
-			if(compressedSize < offsetTableBytes) {
-				// return reserved slot and throw
-				MemoryManager._freeUncompressedSlots.Enqueue(poolIndex);
-				gpuCompressedBuffer.Dispose();
-				gpuOutputBuffer.Dispose();
-				gpuMetadataBuffer.Dispose();
-				intPool.Return(compressedInts);
-				compressedPool.Return(compressedData);
-				throw new Exception("Invalid compressedSize in pool");
-			}
-			int payloadSize = compressedSize - offsetTableBytes;
-			uint[] meta = { (uint)payloadSize, (uint)originalSize };
-			gpuMetadataBuffer.SetData(meta);
+				using(ComputeBuffer gpuOutputBuffer = new ComputeBuffer(32 * 32 * 32, sizeof(int))) {
+					using(ComputeBuffer gpuMetadataBuffer = new ComputeBuffer(2, sizeof(uint))) {
+						int offsetTableBytes = 32 * 32 * 4;
+						if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
+						int payloadSize = compressedSize - offsetTableBytes;
+						uint[] meta = { (uint)payloadSize, (uint)originalSize };
+						gpuMetadataBuffer.SetData(meta);
 
-			ComputeShader decompressionShader = MemoryManager.decompressionShader;
-			int kernel;
-			try {
-				kernel = decompressionShader.FindKernel("CSMain");
-			} catch(Exception ex) {
-				throw new Exception($"Decompression shader missing kernel 'CSMain'. Ensure the assigned compute shader is the decompressor (ChunkDecompressor.compute). Shader: {decompressionShader?.name}", ex);
-			}
-			decompressionShader.SetBuffer(kernel, CompressedInput, gpuCompressedBuffer);
-			decompressionShader.SetBuffer(kernel, ChunkOutput, gpuOutputBuffer);
-			decompressionShader.SetBuffer(kernel, ChunkMetadata, gpuMetadataBuffer);
-			decompressionShader.Dispatch(kernel, 1, 1, 1);
+						ComputeShader decompressionShader = MemoryManager.decompressionShader;
+						int kernel = decompressionShader.FindKernel("CSMain");
+						decompressionShader.SetBuffer(kernel, CompressedInput, gpuCompressedBuffer);
+						decompressionShader.SetBuffer(kernel, ChunkOutput, gpuOutputBuffer);
+						decompressionShader.SetBuffer(kernel, ChunkMetadata, gpuMetadataBuffer);
+						decompressionShader.Dispatch(kernel, 1, 1, 1);
 
-			// Async readback using callback: capture data into a rented int[] and enqueue for main-thread commit.
-			AsyncGPUReadback.Request(gpuOutputBuffer,
-				req => {
-					if(req.hasError) {
-						// Return rented resources and reserved slot and notify failure
-						MemoryManager._freeUncompressedSlots.Enqueue(poolIndex);
-						intPool.Return(compressedInts);
-						compressedPool.Return(compressedData);
-						try {
-							MemoryManager.CompleteCompressionOperation(chunkID, false, new Exception("GPU readback error (decompression)"));
-						} catch { }
-					} else {
-						try {
-							var native = req.GetData<int>();
-							int len = native.Length;
-							int[] rentedInts = ArrayPool<int>.Shared.Rent(len);
-							native.CopyTo(rentedInts);
-							if(len != 32 * 32 * 32) {
-								ArrayPool<int>.Shared.Return(rentedInts);
-								MemoryManager._freeUncompressedSlots.Enqueue(poolIndex);
-								try {
-									MemoryManager.CompleteCompressionOperation(chunkID, false, new Exception($"Decompressed data size mismatch: {len}"));
-								} catch { }
-							} else {
-								// Enqueue for main-thread commit (throttled)
-								MemoryManager.EnqueueDecompressedWrite(chunkID, poolIndex, rentedInts, true);
-							}
-						} catch(Exception ex) {
-							MemoryManager._freeUncompressedSlots.Enqueue(poolIndex);
-							intPool.Return(compressedInts);
-							compressedPool.Return(compressedData);
-							try {
-								MemoryManager.CompleteCompressionOperation(chunkID, false, ex);
-							} catch { }
+						// read back
+						AsyncGPUReadbackRequest readback = AsyncGPUReadback.Request(gpuOutputBuffer);
+						float startTime = Time.realtimeSinceStartup;
+						float timeout = 5.0f;
+						while(!readback.done) {
+							if(readback.hasError) throw new Exception("GPU readback error (decompression)");
+							if(Time.realtimeSinceStartup - startTime > timeout) throw new Exception("GPU readback timed out");
+							await Task.Yield();
 						}
-					}
-					// Dispose GPU buffers used for decompression
-					gpuOutputBuffer.Dispose();
-					gpuCompressedBuffer.Dispose();
-					gpuMetadataBuffer.Dispose();
-					// Return temporary buffers used for upload
-					intPool.Return(compressedInts);
-					compressedPool.Return(compressedData);
-				});
+						if(readback.hasError) throw new Exception("GPU readback error (decompression)");
+						int[] decompressedInts = readback.GetData<int>().ToArray();
+						if(decompressedInts.Length != 32 * 32 * 32) throw new Exception($"Decompressed data size mismatch: {decompressedInts.Length}");
 
-			// Return header immediately; commit happens later.
-			return Task.FromResult(header);
+						// optional CPU validation omitted here for speed
+						int startIndex = poolIndex * 32 * 32 * 32;
+						var uncompressedPool = MemoryManager._uncompressedPool;
+						for(int i = 0; i < decompressedInts.Length; ++i) uncompressedPool[startIndex + i] = decompressedInts[i];
+
+						// update allocation and header
+						alloc.PoolIndex = poolIndex;
+						alloc.CompressedOffset = -1;
+						alloc.CompressedSize = 0;
+						alloc.State = ChunkMemoryManager.ChunkState.Uncompressed;
+						MemoryManager._allocations[chunkID] = alloc;
+
+						header.State = ChunkMemoryManager.ChunkState.Uncompressed;
+						header.CompressedSize = 0;
+						header.IsDirty = false;
+						MemoryManager._headers[chunkID] = header;
+
+						return header;
+					}
+				}
+			}
 		}
 
-		System.Collections.IEnumerator Start() {
-			// Wait briefly for ChunkMemoryManager to initialize (avoid race where MemoryManager.Instance is null)
-			float start = Time.realtimeSinceStartup;
-			while(MemoryManager == null && Time.realtimeSinceStartup - start < 5f) {
-				yield return null;
+		/**
+		* For testing: force a chunk to be re-compressed on next access.
+		* This does not immediately free any memory, it just marks the chunk as dirty.
+		*/
+		public void InvalidateChunk(long chunkID) {
+			if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+				header.IsDirty = true;
+				MemoryManager._headers[chunkID] = header;
 			}
-			var mm = MemoryManager;
-			if(mm == null) {
-				Debug.LogError("ChunkCompressionManager: MemoryManager instance not found after wait");
-				yield break;
+		}
+
+		/**
+		* Compress multiple chunks in a single dispatch (batch).
+		* Each chunk occupies a fixed PER_CHUNK_OUTPUT_BYTES region in the GPU output buffer.
+		*/
+		public async Task<ChunkMemoryManager.CompressedChunk[]> CompressChunks(long[] chunkIDs) {
+			if(chunkIDs == null || chunkIDs.Length == 0) throw new ArgumentException("chunkIDs empty");
+			int count = chunkIDs.Length;
+			int batchCapacity = MemoryManager.CompressionBatchSize;
+			if(count > batchCapacity) throw new ArgumentException($"Batch size {count} exceeds capacity {batchCapacity}");
+
+			const int CHUNK_SIZE_X = 32, CHUNK_SIZE_Y = 32, CHUNK_SIZE_Z = 32;
+			int COLUMN_COUNT = CHUNK_SIZE_X * CHUNK_SIZE_Y;
+			int BLOCKS_PER_CHUNK = CHUNK_SIZE_X * CHUNK_SIZE_Y * CHUNK_SIZE_Z;
+			int offsetTableBytes = COLUMN_COUNT * 4;
+			int perChunkOutputBytes = 262144; // must match shader PER_CHUNK_OUTPUT_BYTES
+			int perChunkOutputInts = perChunkOutputBytes / 4;
+
+			// Build combined input array (chunks concatenated)
+			int[] combined = new int[count * BLOCKS_PER_CHUNK];
+			for(int i = 0; i < count; ++i) {
+				int[] raw = MemoryManager.GetRawDataArray(chunkIDs[i]);
+				if(raw == null || raw.Length != BLOCKS_PER_CHUNK) throw new Exception($"Invalid raw data for chunk {chunkIDs[i]}");
+				Array.Copy(raw, 0, combined, i * BLOCKS_PER_CHUNK, BLOCKS_PER_CHUNK);
 			}
-			// If shaders aren't assigned in inspector, try to auto-load from Resources/Shader/Compute
-			if(mm.compressionShader == null) {
-				var tryComp = Resources.Load<ComputeShader>("Shader/Compute/ChunkCompressor");
-				if(tryComp != null) {
-					mm.compressionShader = tryComp;
-					Debug.Log("ChunkCompressionManager: auto-assigned compression shader from Resources/Shader/Compute/ChunkCompressor");
-				} else {
-					Debug.LogWarning("ChunkCompressionManager: compressionShader not assigned on MemoryManager and auto-load failed");
+
+			// Upload input and clear output/metadata
+			GpuInputBuffer.SetData(combined);
+			int totalOutputInts = perChunkOutputInts * batchCapacity; // buffer was created with this size
+			int[] zeroOut = new int[totalOutputInts];
+			GpuOutputBuffer.SetData(zeroOut);
+			uint[] zeroMeta = new uint[batchCapacity * 2];
+			GpuMetadataBuffer.SetData(zeroMeta);
+
+			// Dispatch groups = count
+			int kernel = CompressionShader.FindKernel("CSMain");
+			CompressionShader.SetBuffer(kernel, ChunkInput, GpuInputBuffer);
+			CompressionShader.SetBuffer(kernel, ChunkCompressedOutput, GpuOutputBuffer);
+			CompressionShader.SetBuffer(kernel, ChunkMetadata, GpuMetadataBuffer);
+			CompressionShader.Dispatch(kernel, count, 1, 1);
+
+			// Read back metadata and output
+			AsyncGPUReadbackRequest metaReq = AsyncGPUReadback.Request(GpuMetadataBuffer);
+			while(!metaReq.done) { if(metaReq.hasError) throw new Exception("GPU metadata readback error"); await Task.Yield(); }
+			uint[] meta = metaReq.GetData<uint>().ToArray();
+
+			AsyncGPUReadbackRequest dataReq = AsyncGPUReadback.Request(GpuOutputBuffer);
+			while(!dataReq.done) { if(dataReq.hasError) throw new Exception("GPU data readback error"); await Task.Yield(); }
+			int[] outputInts = dataReq.GetData<int>().ToArray();
+
+			var results = new ChunkMemoryManager.CompressedChunk[count];
+			for(int i = 0; i < count; ++i) {
+				int payloadSize = (int)meta[i * 2 + 0];
+				int totalBytes = offsetTableBytes + payloadSize;
+				if(totalBytes <= 0) throw new Exception($"Invalid total size for chunk index {i}");
+				int chunkBaseInt = i * perChunkOutputInts;
+				int byteOffset = chunkBaseInt * 4;
+				int availableBytes = outputInts.Length * 4 - byteOffset;
+				if(totalBytes > availableBytes) throw new Exception($"Insufficient readback bytes for chunk {i}: needed={totalBytes} available={availableBytes}");
+				byte[] compressedBytes = new byte[totalBytes];
+				Buffer.BlockCopy(outputInts, byteOffset, compressedBytes, 0, totalBytes);
+
+				// Reserve space in compressed pool
+				int newHead = Interlocked.Add(ref MemoryManager._compressedPoolHead, totalBytes);
+				int poolOffset = newHead - totalBytes;
+				if(poolOffset + totalBytes > MemoryManager._compressedPool.Length) {
+					Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalBytes);
+					throw new Exception("Compressed pool out of memory (batch)");
 				}
-			}
-			if(mm.decompressionShader == null) {
-				var tryDecomp = Resources.Load<ComputeShader>("Shader/Compute/ChunkDecompressor");
-				if(tryDecomp != null) {
-					mm.decompressionShader = tryDecomp;
-					Debug.Log("ChunkCompressionManager: auto-assigned decompression shader from Resources/Shader/Compute/ChunkDecompressor");
+				for(int b = 0; b < totalBytes; ++b) MemoryManager._compressedPool[poolOffset + b] = compressedBytes[b];
+
+				long chunkID = chunkIDs[i];
+				if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) throw new Exception($"Chunk allocation not found for {chunkID}");
+				int oldPoolIndex = alloc.PoolIndex;
+				alloc.CompressedOffset = poolOffset;
+				alloc.CompressedSize = totalBytes;
+				alloc.State = ChunkMemoryManager.ChunkState.Compressed;
+				alloc.PoolIndex = -1;
+				MemoryManager._allocations[chunkID] = alloc;
+
+				if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+					header.State = ChunkMemoryManager.ChunkState.Compressed;
+					header.CompressedSize = totalBytes;
+					header.IsDirty = false;
+					MemoryManager._headers[chunkID] = header;
 				} else {
-					Debug.LogWarning("ChunkCompressionManager: decompressionShader not assigned on MemoryManager and auto-load failed");
+					throw new Exception($"Chunk header not found for {chunkID}");
+				}
+
+				if(oldPoolIndex >= 0) MemoryManager._freeUncompressedSlots.Enqueue(oldPoolIndex);
+
+				results[i] = new ChunkMemoryManager.CompressedChunk { ChunkID = chunkID, Offset = poolOffset, Size = totalBytes };
+			}
+
+			// Notify ChunkMemoryManager that these chunks have been compressed successfully
+			for(int i = 0; i < count; ++i) {
+				long chunkID = chunkIDs[i];
+				try {
+					MemoryManager.CompleteCompressionOperation(chunkID, true, null);
+				} catch {
+					// Non-fatal: best effort notification
 				}
 			}
 
-			// Validate compute shader kernel presence early to give clearer diagnostics
-			if(CompressionShader == null) {
-				Debug.LogError("ChunkCompressionManager: compressionShader not assigned on GameObject");
-			} else {
-				try {
-					CompressionShader.FindKernel("CSComputeSizes");
-					CompressionShader.FindKernel("CSWritePayloads");
-				} catch(Exception ex) {
-					Debug.LogError($"ChunkCompressionManager: Compression shader missing expected kernels (CSComputeSizes/CSWritePayloads): {CompressionShader?.name}. Error: {ex.Message}");
-				}
-			}
-
-			if(mm.decompressionShader == null) {
-				Debug.LogError("ChunkCompressionManager: decompressionShader not assigned on MemoryManager");
-			} else {
-				try {
-					mm.decompressionShader.FindKernel("CSMain");
-				} catch(Exception ex) {
-					Debug.LogError($"ChunkCompressionManager: Decompression shader missing expected kernel 'CSMain': {mm.decompressionShader?.name}. Error: {ex.Message}");
-				}
-			}
+			return results;
 		}
 	}
 }

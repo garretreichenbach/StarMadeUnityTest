@@ -98,9 +98,9 @@ namespace Dev.Testing.Terrain {
 				SeedBasedTerrainGenerator.GenerateChunk(chunkData, chunkX, chunkY, chunkZ, worldSeed, asteroidSettings);
 
 				// Log generation info
-				// Debug.Log($"Generated chunk [{chunkX},{chunkY},{chunkZ}] with ID: {chunkID}");
+				Debug.Log($"Generated chunk [{chunkX},{chunkY},{chunkZ}] with ID: {chunkID}");
 			}
-			// Debug.Log($"Successfully generated {chunksTotal} chunks in global memory system");
+			Debug.Log($"Successfully generated {chunksTotal} chunks in global memory system");
 		}
 
 		long GenerateChunkID(int entityID, int chunkIndex) {
