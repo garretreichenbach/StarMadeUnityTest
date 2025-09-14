@@ -178,7 +178,6 @@ namespace Universe.Data.Chunk {
 				return;
 			}
 			Instance = this;
-			DontDestroyOnLoad(gameObject);
 			InitializeMemoryPools();
 			InitializeGPUResources();
 			// Initialize GPU mutex
@@ -683,12 +682,10 @@ namespace Universe.Data.Chunk {
 			for(int i = 0; i < entity.Chunks.Length; i++) {
 				var chunk = entity.Chunks[i];
 				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
-					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
 					continue;
 				}
 
 				if(allocation.State == ChunkState.Uncompressed) {
-					Debug.Log($"[CompressEntity] Scheduling compression for chunkID={chunk._chunkID} at index={i}");
 					compressionTasks.Add(CompressChunk(chunk._chunkID));
 				}
 			}
@@ -702,18 +699,15 @@ namespace Universe.Data.Chunk {
 			for(int i = 0; i < entity.Chunks.Length; i++) {
 				var chunk = entity.Chunks[i];
 				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
-					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
 					continue;
 				}
 
 				if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
-					Debug.LogWarning($"Chunk {chunk._chunkID} is being processed, waiting for compression");
 					WaitForChunkOperation(chunk._chunkID);
 				}
 
 				// Now the chunk should be compressed
 				if(!_allocations.TryGetValue(chunk._chunkID, out allocation) || allocation.State != ChunkState.Compressed) {
-					Debug.LogError($"Chunk {chunk._chunkID} is not compressed after operation");
 					continue;
 				}
 

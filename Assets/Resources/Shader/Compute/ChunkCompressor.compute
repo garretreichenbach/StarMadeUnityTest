@@ -1,5 +1,4 @@
 ﻿// ChunkCompressor.compute
-// Todo: This is ok, but we should do something a little more advanced later
 // GPU chunk compression shader (LZ4-style, parallel per block column)
 // Thread group: [numthreads(32,32,1)]
 

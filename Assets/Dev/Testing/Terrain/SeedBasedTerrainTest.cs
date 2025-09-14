@@ -41,7 +41,6 @@ namespace Dev.Testing.Terrain {
 		}*/
 
 		void GenerateTestAsteroid() {
-			Debug.Log("=== Generating Test Asteroid ===");
 			GameObject asteroidGo = new GameObject($"Entity_Asteroid_{System.Guid.NewGuid()}");
 			Asteroid entity = asteroidGo.AddComponent<Asteroid>();
 			entity.Data = new GameEntity.GameEntityData {
@@ -77,7 +76,6 @@ namespace Dev.Testing.Terrain {
 
 		void GenerateChunksWithGlobalMemory(GameEntity entity) {
 			int chunksTotal = entity.Chunks.Length;
-			Debug.Log($"Generating {chunksTotal} chunks using GlobalChunkMemoryManager");
 
 			// Generate all chunks using the global memory system
 			for(int i = 0; i < chunksTotal; i++) {
@@ -96,11 +94,7 @@ namespace Dev.Testing.Terrain {
 
 				// Generate terrain data directly into global memory
 				SeedBasedTerrainGenerator.GenerateChunk(chunkData, chunkX, chunkY, chunkZ, worldSeed, asteroidSettings);
-
-				// Log generation info
-				Debug.Log($"Generated chunk [{chunkX},{chunkY},{chunkZ}] with ID: {chunkID}");
 			}
-			Debug.Log($"Successfully generated {chunksTotal} chunks in global memory system");
 		}
 
 		long GenerateChunkID(int entityID, int chunkIndex) {
@@ -114,8 +108,6 @@ namespace Dev.Testing.Terrain {
 		}
 
 		void SetupCrossChunkResolver(GameEntity entity) {
-			Debug.Log("Setting up cross-chunk resolver for global memory system");
-
 			// Updated cross-chunk resolver that works with ChunkData
 			ChunkBuilder.ExternalBlockResolver = (currentChunk, lx, ly, lz) => {
 				int s = IChunkData.ChunkSize;

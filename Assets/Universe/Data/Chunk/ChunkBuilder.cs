@@ -37,8 +37,6 @@ namespace Universe.Data.Chunk {
 			// Generate faces using greedy meshing per direction with a max face size (LOD-like behavior)
 			int blockCount = GenerateGreedyFaces(chunk, facePositions, faceDirs, faceSizes);
 
-			Debug.Log($"[ChunkBuilder] BuildChunk: chunk valid, blockCount={blockCount}, faces={facePositions.Count}");
-
 			if(blockCount == 0) {
 				Debug.LogWarning("[ChunkBuilder] BuildChunk: No blocks found in chunk.");
 			}

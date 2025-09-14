@@ -126,9 +126,14 @@ namespace Universe.Data.GameEntity {
 				Debug.LogWarning($"Entity {Name} is not loaded. Cannot write chunk data.");
 				return false;
 			}
+			var sw = System.Diagnostics.Stopwatch.StartNew();
 			byte[] compressedData = await ChunkMemoryManager.Instance.CompressEntity(this);
-			_ = EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
-			return true;
+			bool result = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
+			sw.Stop();
+			if(sw.ElapsedMilliseconds > 5000) {
+				Debug.LogWarning($"[GameEntity] WriteChunkData for entity {UID} took {sw.ElapsedMilliseconds} ms - consider optimizing storage or chunk size.");
+			}
+			return result;
 		}
 
 		public IChunkData GetChunkData(long index) {
@@ -185,7 +190,6 @@ namespace Universe.Data.GameEntity {
 					continue;
 				}
 				Vector3 chunkPos = GetChunkPosition(i);
-				Debug.Log($"[GameEntity] RebuildMesh: Building chunk {i} (chunkID={(chunk is ChunkData cdx ? cdx._chunkID.ToString() : "?")})");
 				ChunkBuildResult result = ChunkBuilder.BuildChunk(chunk);
 				combine[i].mesh = result.mesh;
 				combine[i].transform = Matrix4x4.TRS(chunkPos, Quaternion.identity, Vector3.one);

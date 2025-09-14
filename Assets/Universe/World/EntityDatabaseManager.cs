@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Threading.Tasks;
+using System.Threading;
 using Settings;
 using Unity.VisualScripting;
 using Unity.VisualScripting.Dependencies.Sqlite;
@@ -97,6 +99,17 @@ namespace Universe.World {
 
 		SQLiteConnection _db;
 
+		// Write queue for chunk data
+		class WriteRequest {
+			public string Path;
+			public byte[] Data;
+			public TaskCompletionSource<bool> Completion;
+		}
+
+		ConcurrentQueue<WriteRequest> _writeQueue = new ConcurrentQueue<WriteRequest>();
+		CancellationTokenSource _writeCts = new CancellationTokenSource();
+		Task _writeTask;
+
 		void Awake() {
 			if(Instance != null && Instance != this) {
 				Destroy(this);
@@ -107,6 +120,10 @@ namespace Universe.World {
 			}
 		}
 
+		void Start() {
+			_writeTask = Task.Run(ProcessWriteQueue);
+		}
+
 		void Update() {
 			if(!InstantCommit && _needsCommit) {
 				_commitTimer += Time.deltaTime;
@@ -115,6 +132,27 @@ namespace Universe.World {
 					_commitTimer = 0f;
 					_needsCommit = false;
 					Debug.Log("Committed changes to the entity database.");
+				}
+			}
+		}
+
+		async Task ProcessWriteQueue() {
+			while (!_writeCts.Token.IsCancellationRequested) {
+				if (_writeQueue.TryDequeue(out var req)) {
+					var sw = System.Diagnostics.Stopwatch.StartNew();
+					try {
+						var folderPath = System.IO.Path.GetDirectoryName(req.Path);
+						if (!System.IO.Directory.Exists(folderPath)) {
+							System.IO.Directory.CreateDirectory(folderPath);
+						}
+						await System.IO.File.WriteAllBytesAsync(req.Path, req.Data);
+						req.Completion.SetResult(true);
+					} catch (System.Exception ex) {
+						Debug.LogError($"[WriteQueue] Failed to write chunk data to {req.Path}: {ex}");
+						req.Completion.SetResult(false);
+					}
+				} else {
+					await Task.Delay(10); // Avoid busy-wait
 				}
 			}
 		}
@@ -219,16 +257,18 @@ namespace Universe.World {
 		* Writes entity chunk data to disk.
 		*/
 		public async Task<bool> WriteChunkData(string chunkDataPath, byte[] compressedData) {
-			var folderPath = System.IO.Path.GetDirectoryName(chunkDataPath);
-			if(!System.IO.Directory.Exists(folderPath)) {
-				System.IO.Directory.CreateDirectory(folderPath);
-			}
-			try {
-				await System.IO.File.WriteAllBytesAsync(chunkDataPath, compressedData);
-				return true;
-			} catch(System.Exception ex) {
-				Debug.LogError($"Failed to write chunk data to {chunkDataPath}: {ex}");
-				return false;
+			var req = new WriteRequest {
+				Path = chunkDataPath,
+				Data = compressedData,
+				Completion = new TaskCompletionSource<bool>()
+			};
+			_writeQueue.Enqueue(req);
+			return await req.Completion.Task;
+		}
+
+		public async Task FlushChunkDataWrites() {
+			while (!_writeQueue.IsEmpty) {
+				await Task.Delay(10);
 			}
 		}
 
@@ -280,6 +320,11 @@ namespace Universe.World {
 		}
 
 		void OnDestroy() {
+			FlushChunkDataWrites().Wait();
+			 _writeCts.Cancel();
+			_writeTask?.Wait(1000);
+			_writeTask = null;
+			_writeCts.Dispose();
 			_db?.Dispose();
 			_db = null;
 			Instance = null;
