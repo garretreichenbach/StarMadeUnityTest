@@ -21,7 +21,7 @@ namespace Settings {
 
 		[InspectorLabel("Max Chunk Operation Wait Time")]
 		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
-		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 10.0f, 1.0f, 30.0f, true);
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 30.0f, 1.0f, 60.0f, true);
 
 		[InspectorLabel("Max Entity Rebuilds Per Frame")]
 		[Tooltip("Maximum number of entity mesh rebuilds to perform per frame.")]
