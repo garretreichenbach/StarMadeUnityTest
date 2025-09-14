@@ -8,9 +8,10 @@
 
 #pragma kernel CSMain
 
-ByteAddressBuffer       CompressedInput; // Compressed data (offset table + data)
-RWStructuredBuffer<int> ChunkOutput; // Uncompressed output (32*32*32 ints)
-StructuredBuffer<uint>  ChunkMetadata; // [0]=compressed size, [1]=original size
+// Add batch dimension
+ByteAddressBuffer       CompressedInput; // [batchSize * maxCompressedSize] Compressed data
+RWStructuredBuffer<int> ChunkOutput; // [batchSize * 32*32*32] Uncompressed output
+StructuredBuffer<uint>  ChunkMetadata; // [batchSize * 4] per-chunk metadata
 
 #define CHUNK_SIZE_X 32
 #define CHUNK_SIZE_Y 32
@@ -22,38 +23,43 @@ StructuredBuffer<uint>  ChunkMetadata; // [0]=compressed size, [1]=original size
 [numthreads(32,32,1)]
 void CSMain(uint3 id : SV_DispatchThreadID)
 {
-	if(id.x >= CHUNK_SIZE_X || id.y >= CHUNK_SIZE_Y) return;
+    uint batchIdx = id.z;
+    if(id.x >= CHUNK_SIZE_X || id.y >= CHUNK_SIZE_Y) return;
 
-	uint columnIndex = id.x + id.y * CHUNK_SIZE_X;
-	uint offsetTableStart = 0;
-	uint dataStart = COLUMN_COUNT * 4; // Offset table is 4 bytes per column
+    uint chunkInputOffset = batchIdx * (BLOCKS_PER_CHUNK * 2 * 4 + COLUMN_COUNT * 4); // max compressed size per chunk
+    uint chunkOutputOffset = batchIdx * BLOCKS_PER_CHUNK;
+    uint metaOffset = batchIdx * 4;
 
-	// Read start and end offsets for this column
-	uint colOffset = CompressedInput.Load(offsetTableStart + columnIndex * 4);
-	uint nextColOffset;
-	if(columnIndex < COLUMN_COUNT - 1) nextColOffset = CompressedInput.Load(offsetTableStart + (columnIndex + 1) * 4);
-	else nextColOffset = ChunkMetadata[0]; // Total compressed byte length (do NOT subtract dataStart)
+    uint columnIndex = id.x + id.y * CHUNK_SIZE_X;
+    uint offsetTableStart = chunkInputOffset;
+    uint dataStart = chunkInputOffset + COLUMN_COUNT * 4;
 
-	uint compressedPtr = dataStart + colOffset;
-	uint compressedEnd = dataStart + nextColOffset;
-	uint outputBase = columnIndex * CHUNK_SIZE_Z;
-	uint outIdx = 0;
+    // Read start and end offsets for this column
+    uint colOffset = CompressedInput.Load(offsetTableStart + columnIndex * 4);
+    uint nextColOffset;
+    if(columnIndex < COLUMN_COUNT - 1) nextColOffset = CompressedInput.Load(offsetTableStart + (columnIndex + 1) * 4);
+    else nextColOffset = ChunkMetadata[metaOffset + 0]; // Total compressed byte length (do NOT subtract dataStart)
 
-	// Decompress (value, runLength) pairs
-	while(compressedPtr + 8 <= compressedEnd && outIdx < CHUNK_SIZE_Z)
-	{
-		int value = asint(CompressedInput.Load(compressedPtr));
-		uint runLength = CompressedInput.Load(compressedPtr + 4);
-		compressedPtr += 8;
-		for(uint r = 0; r < runLength && outIdx < CHUNK_SIZE_Z; ++r)
-		{
-			ChunkOutput[outputBase + outIdx] = value;
-			outIdx++;
-		}
-	}
-	// Fill any remaining with 0 (should not happen if data is valid)
-	for(; outIdx < CHUNK_SIZE_Z; ++outIdx)
-	{
-		ChunkOutput[outputBase + outIdx] = 0;
-	}
+    uint compressedPtr = dataStart + colOffset;
+    uint compressedEnd = dataStart + nextColOffset;
+    uint outputBase = chunkOutputOffset + columnIndex * CHUNK_SIZE_Z;
+    uint outIdx = 0;
+
+    // Decompress (value, runLength) pairs
+    while(compressedPtr + 8 <= compressedEnd && outIdx < CHUNK_SIZE_Z)
+    {
+        int value = asint(CompressedInput.Load(compressedPtr));
+        uint runLength = CompressedInput.Load(compressedPtr + 4);
+        compressedPtr += 8;
+        for(uint r = 0; r < runLength && outIdx < CHUNK_SIZE_Z; ++r)
+        {
+            ChunkOutput[outputBase + outIdx] = value;
+            outIdx++;
+        }
+    }
+    // Fill any remaining with 0 (should not happen if data is valid)
+    for(; outIdx < CHUNK_SIZE_Z; ++outIdx)
+    {
+        ChunkOutput[outputBase + outIdx] = 0;
+    }
 }

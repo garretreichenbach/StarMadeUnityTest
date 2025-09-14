@@ -17,19 +17,30 @@ namespace Settings {
 		[Header("Performance Settings")]
 		[InspectorLabel("GPU Readback Timeout")]
 		[Tooltip("Maximum time in seconds to wait for GPU readback to complete before timing out.")]
-		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout", "Maximum time in seconds to wait for GPU readback to complete before timing out.", 50.0f, 1.0f, 30.0f, true);
+		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout",
+			"Maximum time in seconds to wait for GPU readback to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
 
 		[InspectorLabel("Max Chunk Operation Wait Time")]
 		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
-		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 1.0f, 30.0f, true);
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time",
+			"Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
 
 		[InspectorLabel("Max Entity Rebuilds Per Frame")]
 		[Tooltip("Maximum number of entity mesh rebuilds to perform per frame.")]
-		public IntSettingsValue MaxEntityRebuildsPerFrame = new IntSettingsValue("Max Entity Rebuilds Per Frame", "Maximum number of entity mesh rebuilds to perform per frame.", 5, 1, 10);
+		public IntSettingsValue MaxEntityRebuildsPerFrame = new IntSettingsValue("Max Entity Rebuilds Per Frame",
+			"Maximum number of entity mesh rebuilds to perform per frame.", 5, 1, 10, true);
 
 		[InspectorLabel("GPU Compression Buffer Pool Size")]
 		[Tooltip("Number of buffers to allocate for GPU compression tasks.")]
-		public IntOptionsSettingsValue GPUCompressionBufferPoolSize = new IntOptionsSettingsValue("GPU Compression Buffer Pool Size", "Number of buffers to allocate for GPU compression tasks.", 4, new[] { 1, 2, 4, 8, 16 });
+		public IntOptionsSettingsValue GPUCompressionBufferPoolSize = new IntOptionsSettingsValue("GPU Compression Buffer Pool Size",
+			"Number of buffers to allocate for GPU compression tasks.", 4, new[] { 1, 2, 4, 8, 16 }, true);
+
+		[InspectorLabel("GPU Compression Batch Size")]
+		[Tooltip("Number of chunks to process per GPU compression/decompression batch.")]
+		public IntOptionsSettingsValue GPUCompressionBatchSize = new IntOptionsSettingsValue("GPU Compression Batch Size",
+			"Number of chunks to process per GPU compression/decompression batch.",
+			4, // default
+			new[] { 1, 2, 4, 8, 16 }, true);
 
 		#endregion
 
@@ -139,6 +150,7 @@ namespace Settings {
 				VSyncMode = VSyncMode.Value,
 				StatsOverlayMode = StatsOverlayMode.Value,
 				GPUCompressionBufferPoolSize = GPUCompressionBufferPoolSize.Value,
+				GPUCompressionBatchSize = GPUCompressionBatchSize.Value
 			};
 		}
 
@@ -152,6 +164,7 @@ namespace Settings {
 			if(dict.ContainsKey("VSyncMode")) VSyncMode.SetValue(Convert.ToInt32(dict["VSyncMode"]));
 			if(dict.ContainsKey("StatsOverlayMode")) StatsOverlayMode.SetValue((StatsDisplay.DisplayMode)Enum.Parse(typeof(StatsDisplay.DisplayMode), dict["StatsOverlayMode"].ToString()));
 			if(dict.ContainsKey("GPUCompressionBufferPoolSize")) GPUCompressionBufferPoolSize.SetValue(Convert.ToInt32(dict["GPUCompressionBufferPoolSize"]));
+			if(dict.ContainsKey("GPUCompressionBatchSize")) GPUCompressionBatchSize.SetValue(Convert.ToInt32(dict["GPUCompressionBatchSize"]));
 		}
 
 		/**
@@ -160,7 +173,12 @@ namespace Settings {
 		public void SetDefaults() {
 			FPSLimit.SetValue(FPSLimit.DefaultValue);
 			VSyncMode.SetValue(VSyncMode.DefaultValue);
-
+			StatsOverlayMode.SetValue(StatsOverlayMode.DefaultValue);
+			GPUCompressionBufferPoolSize.SetValue(GPUCompressionBufferPoolSize.DefaultValue);
+			GPUCompressionBatchSize.SetValue(GPUCompressionBatchSize.DefaultValue);
+			MaxGPUReadbackTimeout.SetValue(MaxGPUReadbackTimeout.DefaultValue);
+			MaxChunkOperationWaitTime.SetValue(MaxChunkOperationWaitTime.DefaultValue);
+			MaxEntityRebuildsPerFrame.SetValue(MaxEntityRebuildsPerFrame.DefaultValue);
 			SaveSettings();
 		}
 	}

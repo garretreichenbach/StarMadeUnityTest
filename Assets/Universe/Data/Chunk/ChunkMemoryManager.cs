@@ -51,7 +51,6 @@ namespace Universe.Data.Chunk {
 		int maxUncompressedChunks = 1024; // ~32MB for 1024 chunks
 
 		[SerializeField] int maxCompressedChunks = 4096; // Variable size pool
-		[SerializeField] int compressionBatchSize = 16; // GPU batch size
 
 		// Each uncompressed chunk: 32³ blocks × 4 bytes = 131,072 bytes (128KB)
 		const int UncompressedChunkSize = 32 * 32 * 32 * sizeof(int);
@@ -202,12 +201,12 @@ namespace Universe.Data.Chunk {
 				Debug.LogError("Compression shaders not assigned! GPU compression disabled.");
 				return;
 			}
-
+			int batchSize = EngineSettings.Instance.GPUCompressionBatchSize.Value;
 			// Create GPU buffers for batch compression operations
-			GPUInputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int));
+			GPUInputBuffer = new ComputeBuffer(batchSize * BlocksPerChunk, sizeof(int));
 			// Output buffer is used as a ByteAddressBuffer in the compute shader, so create it as a raw buffer
-			GPUOutputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int), ComputeBufferType.Raw); // Max size (byte-addressable)
-			GPUMetadataBuffer = new ComputeBuffer(compressionBatchSize, sizeof(int) * 4); // Per-chunk metadata (structured)
+			GPUOutputBuffer = new ComputeBuffer(batchSize * BlocksPerChunk, sizeof(int), ComputeBufferType.Raw); // Max size (byte-addressable)
+			GPUMetadataBuffer = new ComputeBuffer(batchSize, sizeof(int) * 4); // Per-chunk metadata (structured)
 		}
 
 		#endregion
@@ -894,3 +893,4 @@ namespace Universe.Data.Chunk {
 		}
 	}
 }
+

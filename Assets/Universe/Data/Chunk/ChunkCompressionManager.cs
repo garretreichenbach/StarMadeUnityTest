@@ -63,6 +63,7 @@ namespace Universe.Data.Chunk {
 			int bufferPoolSize = EngineSettings.Instance.GPUCompressionBufferPoolSize.Value;
 			_bufferPool = new BufferSet[bufferPoolSize];
 			_availableBuffers = new Queue<int>(bufferPoolSize);
+
 			for(int i = 0; i < bufferPoolSize; i++) {
 				_bufferPool[i] = new BufferSet {
 					Input = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
@@ -309,7 +310,7 @@ namespace Universe.Data.Chunk {
 				// Prepare output buffer (for decompressed ints)
 				// (already allocated in buffer pool)
 				// Prepare metadata buffer
-				int offsetTableBytes = 32 * 32 * 4; // COLUMN_COUNT * 4
+				int offsetTableBytes = 32 * 32 * 4;
 				if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
 				int payloadSize = (compressedSize - offsetTableBytes);
 				uint[] meta = { (uint)payloadSize, (uint)originalSize };
