@@ -52,8 +52,6 @@ namespace Universe.Data.Chunk {
 
 		[SerializeField] int maxCompressedChunks = 4096; // Variable size pool
 		[SerializeField] int compressionBatchSize = 16; // GPU batch size
-		// Public accessor for tools/other managers to read batch capacity
-		public int CompressionBatchSize => compressionBatchSize;
 
 		// Each uncompressed chunk: 32³ blocks × 4 bytes = 131,072 bytes (128KB)
 		const int UncompressedChunkSize = 32 * 32 * 32 * sizeof(int);
@@ -222,12 +220,8 @@ namespace Universe.Data.Chunk {
 			// Create GPU buffers for batch compression operations
 			GPUInputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int));
 			// Output buffer is used as a ByteAddressBuffer in the compute shader, so create it as a raw buffer
-			// PER_CHUNK_OUTPUT_BYTES (in bytes) defined in shader: 262144
-			int perChunkOutputInts = 262144 / 4; // 65536 ints per chunk
-			GPUOutputBuffer = new ComputeBuffer(compressionBatchSize * perChunkOutputInts, sizeof(int), ComputeBufferType.Raw);
-			// Metadata: two uints per chunk (payloadSize, originalSize)
-			GPUMetadataBuffer = new ComputeBuffer(compressionBatchSize * 2, sizeof(int));
-
+			GPUOutputBuffer = new ComputeBuffer(compressionBatchSize * BlocksPerChunk, sizeof(int), ComputeBufferType.Raw); // Max size (byte-addressable)
+			GPUMetadataBuffer = new ComputeBuffer(compressionBatchSize, sizeof(int) * 4); // Per-chunk metadata (structured)
 		}
 
 		#endregion
@@ -567,8 +561,7 @@ namespace Universe.Data.Chunk {
 
 			foreach(var kvp in _headers) {
 				ChunkHeader header = kvp.Value;
-				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) && allocation.State == ChunkState.Uncompressed && header.LastAccessTime < oldestTime && Time.time - header.LastAccessTime > 30.0f) // 30 second threshold
-				{
+				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) && allocation.State == ChunkState.Uncompressed && header.LastAccessTime < oldestTime && Time.time - header.LastAccessTime > 30.0f) { // 30 second threshold
 					oldestTime = header.LastAccessTime;
 					oldestChunkID = kvp.Key;
 				}
@@ -684,72 +677,25 @@ namespace Universe.Data.Chunk {
 		*/
 		public async Task<byte[]> CompressEntity(GameEntity.GameEntity entity) {
 			var entityData = new System.IO.MemoryStream();
-			// Use batched compression: collect all uncompressed chunk IDs and dispatch in one GPU batch
-			var toCompress = new List<long>();
+			var compressionTasks = new List<Task<bool>>();
+
+			// First, start compression tasks for all uncompressed chunks
 			for(int i = 0; i < entity.Chunks.Length; i++) {
 				var chunk = entity.Chunks[i];
 				if(!_allocations.TryGetValue(chunk._chunkID, out ChunkAllocation allocation)) {
 					Debug.LogWarning($"Chunk {chunk._chunkID} not allocated, skipping compression");
 					continue;
 				}
+
 				if(allocation.State == ChunkState.Uncompressed) {
-					// mark as compressing to reserve slot and avoid races
-					allocation.State = ChunkState.GPUCompressing;
-					_allocations[chunk._chunkID] = allocation;
-					toCompress.Add(chunk._chunkID);
-					// Create an active CompressionOperation so callers can wait for this chunk
-					CompressionOperation op = new CompressionOperation {
-						ChunkID = chunk._chunkID,
-						TargetState = ChunkState.Compressed,
-						CompletionSource = new TaskCompletionSource<bool>(),
-						StartTime = Time.time,
-						ReadbackRequest = null
-					};
-					_activeOperations[chunk._chunkID] = op;
+					Debug.Log($"[CompressEntity] Scheduling compression for chunkID={chunk._chunkID} at index={i}");
+					compressionTasks.Add(CompressChunk(chunk._chunkID));
 				}
 			}
 
-			if(toCompress.Count > 0) {
-				// Process in batches to respect GPU batch capacity
-				ChunkCompressionManager compressionManager = CompressionManager;
-				if(compressionManager != null) {
-					int batchCap = this.CompressionBatchSize;
-					try {
-						await _gpuMutex.WaitAsync();
-						try {
-							for(int start = 0; start < toCompress.Count; start += batchCap) {
-								int len = Math.Min(batchCap, toCompress.Count - start);
-								long[] batchIds = new long[len];
-								toCompress.CopyTo(start, batchIds, 0, len);
-								try {
-									await compressionManager.CompressChunks(batchIds);
-								} catch(Exception exBatch) {
-									Debug.LogError($"Batch GPU compression failed for batch starting at {start}: {exBatch.Message}");
-									// Reset states for this batch so caller can retry individual chunks
-									for(int bi = 0; bi < batchIds.Length; ++bi) {
-										long id = batchIds[bi];
-										if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
-									}
-									// continue with next batch
-								}
-							}
-						} finally {
-							_gpuMutex.Release();
-						}
-					} catch(Exception ex) {
-						Debug.LogError($"Batch GPU compression outer failure: {ex.Message}");
-						// Reset any remaining toCompress entries to Uncompressed
-						foreach(var id in toCompress) {
-							if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
-						}
-					}
-				} else {
-					Debug.LogError("No ChunkCompressionManager available for batch compression");
-					// Reset states
-					foreach(var id in toCompress) {
-						if(_allocations.TryGetValue(id, out var a)) { a.State = ChunkState.Uncompressed; _allocations[id] = a; }
-					}
-				}
+			// Await all compression tasks
+			if(compressionTasks.Count > 0) {
+				await Task.WhenAll(compressionTasks);
 			}
 
 			// Now, collect compressed data for all chunks
@@ -819,17 +765,6 @@ namespace Universe.Data.Chunk {
 		void ProcessCompletedOperation(CompressionOperation operation) {
 			// TODO: Implement based on operation type
 			operation.CompletionSource.SetResult(true);
-		}
-
-		// Allow external callers (e.g. ChunkCompressionManager) to complete per-chunk compression operations
-		public void CompleteCompressionOperation(long chunkID, bool success, Exception ex = null) {
-			if(!_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) return;
-			if(success) {
-				try { op.CompletionSource.SetResult(true); } catch { }
-			} else {
-				try { op.CompletionSource.SetException(ex ?? new Exception("Compression failed (batch)")); } catch { }
-			}
-			_activeOperations.Remove(chunkID);
 		}
 
 		#endregion
