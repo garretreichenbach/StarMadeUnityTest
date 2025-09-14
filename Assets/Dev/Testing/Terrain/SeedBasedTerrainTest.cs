@@ -77,7 +77,7 @@ namespace Dev.Testing.Terrain {
 
 		void GenerateChunksWithGlobalMemory(GameEntity entity) {
 			int chunksTotal = entity.Chunks.Length;
-			// Debug.Log($"Generating {chunksTotal} chunks using GlobalChunkMemoryManager");
+			Debug.Log($"Generating {chunksTotal} chunks using GlobalChunkMemoryManager");
 
 			// Generate all chunks using the global memory system
 			for(int i = 0; i < chunksTotal; i++) {
@@ -114,7 +114,7 @@ namespace Dev.Testing.Terrain {
 		}
 
 		void SetupCrossChunkResolver(GameEntity entity) {
-			// Debug.Log("Setting up cross-chunk resolver for global memory system");
+			Debug.Log("Setting up cross-chunk resolver for global memory system");
 
 			// Updated cross-chunk resolver that works with ChunkData
 			ChunkBuilder.ExternalBlockResolver = (currentChunk, lx, ly, lz) => {

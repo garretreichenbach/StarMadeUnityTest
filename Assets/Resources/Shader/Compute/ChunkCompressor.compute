@@ -37,7 +37,6 @@ void CSComputeSizes(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_Gro
     uint columnOffset = lx + ly * CHUNK_SIZE_X;
     uint inputBase = chunkIndex * BLOCKS_PER_CHUNK + columnOffset * CHUNK_SIZE_Z;
     uint localBytes = 0;
-
     // simple RLE per column
     if(inBounds) {
         int prev = ChunkInput[inputBase];
@@ -47,22 +46,20 @@ void CSComputeSizes(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_Gro
             if(curr == prev && runLength < 0xFFFFFFFF) {
                 runLength++;
             } else {
-                localBytes += 8; // 4 bytes value + 4 bytes run length
+                localBytes += 8;
                 prev = curr;
                 runLength = 1;
             }
         }
-        localBytes += 8; // Final run
+        localBytes += 8;
     }
-
     if(inBounds) sharedLocalBytes[columnOffset] = localBytes; else sharedLocalBytes[columnOffset] = 0;
     GroupMemoryBarrierWithGroupSync();
-
     if(lx == 0 && ly == 0) {
         uint running = 0;
-        for(uint colIdx = 0; colIdx < COLUMN_COUNT; ++colIdx) { // Renamed from 'col' to 'colIdx'
-            uint v = sharedLocalBytes[colIdx];
-            sharedOffsets[colIdx] = running;
+        for(uint i = 0; i < COLUMN_COUNT; ++i) {
+            uint v = sharedLocalBytes[i];
+            sharedOffsets[i] = running;
             running += v;
         }
         // write payload size and original size into metadata
@@ -81,24 +78,27 @@ void CSWritePayloads(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_Gr
     uint columnOffset = lx + ly * CHUNK_SIZE_X;
     uint inputBase = chunkIndex * BLOCKS_PER_CHUNK + columnOffset * CHUNK_SIZE_Z;
 
-    // Process compression and write directly to output to avoid large local arrays
+    uint localCompressed[CHUNK_SIZE_Z * 2]; // temp store value,run pairs
     uint localBytes = 0u;
 
     if(inBounds) {
         int prev = ChunkInput[inputBase];
         uint runLength = 1;
-
         for(uint z = 1; z < CHUNK_SIZE_Z; ++z) {
             int curr = ChunkInput[inputBase + z];
             if(curr == prev && runLength < 0xFFFFFFFF) {
                 runLength++;
             } else {
+                localCompressed[localBytes / 4] = asuint(prev);
+                localCompressed[localBytes / 4 + 1] = runLength;
                 localBytes += 8;
                 prev = curr;
                 runLength = 1;
             }
         }
-        localBytes += 8; // Final run
+        localCompressed[localBytes / 4] = asuint(prev);
+        localCompressed[localBytes / 4 + 1] = runLength;
+        localBytes += 8;
     }
 
     // store local byte counts
@@ -108,45 +108,29 @@ void CSWritePayloads(uint3 groupThread : SV_GroupThreadID, uint3 groupId : SV_Gr
     // compute per-column offsets (single thread per group)
     if(lx == 0 && ly == 0) {
         uint running = 0;
-        for(uint colIdx = 0; colIdx < COLUMN_COUNT; ++colIdx) { // Renamed from 'col' to 'colIdx'
-            uint v = sharedLocalBytes[colIdx];
-            sharedOffsets[colIdx] = running;
+        for(uint i = 0; i < COLUMN_COUNT; ++i) {
+            uint v = sharedLocalBytes[i];
+            sharedOffsets[i] = running;
             running += v;
         }
         // write offset table starting at chunkBase
         uint chunkBase = ChunkBaseBytes[chunkIndex];
-        for(uint colIdx2 = 0; colIdx2 < COLUMN_COUNT; ++colIdx2) { // Renamed from 'col' to 'colIdx2'
-            GlobalCompressedOutput.Store(chunkBase + colIdx2 * 4, sharedOffsets[colIdx2]);
+        for(uint i = 0; i < COLUMN_COUNT; ++i) {
+            GlobalCompressedOutput.Store(chunkBase + i * 4, sharedOffsets[i]);
         }
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // Now write the actual compressed data directly to output
     if(inBounds) {
         uint chunkBase = ChunkBaseBytes[chunkIndex];
         uint dataStart = chunkBase + COLUMN_COUNT * 4;
-        uint outPtr = dataStart + sharedOffsets[columnOffset];
-
-        // Recompress and write directly to avoid local storage
-        int prev = ChunkInput[inputBase];
-        uint runLength = 1;
-
-        for(uint z = 1; z < CHUNK_SIZE_Z; ++z) {
-            int curr = ChunkInput[inputBase + z];
-            if(curr == prev && runLength < 0xFFFFFFFF) {
-                runLength++;
-            } else {
-                // Write value,run pair directly to global output
-                GlobalCompressedOutput.Store(outPtr, asuint(prev));
-                GlobalCompressedOutput.Store(outPtr + 4, runLength);
-                outPtr += 8;
-                prev = curr;
-                runLength = 1;
-            }
+        uint outPtr = sharedOffsets[columnOffset];
+        for(uint i = 0; i < localBytes; i += 8) {
+            uint v0 = localCompressed[i / 4];
+            uint v1 = localCompressed[i / 4 + 1];
+            GlobalCompressedOutput.Store(dataStart + outPtr + i, v0);
+            GlobalCompressedOutput.Store(dataStart + outPtr + i + 4, v1);
         }
-        // Write final run
-        GlobalCompressedOutput.Store(outPtr, asuint(prev));
-        GlobalCompressedOutput.Store(outPtr + 4, runLength);
     }
     GroupMemoryBarrierWithGroupSync();
 }

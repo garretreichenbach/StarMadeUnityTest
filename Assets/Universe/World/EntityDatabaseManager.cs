@@ -12,7 +12,7 @@ namespace Universe.World {
 	* Manages the saving and loading of game entities to and from the database using LiteDB.
 	*/
 	public class EntityDatabaseManager : MonoBehaviour {
-
+		
 		[Header("Database Settings")]
 		[InspectorLabel("Instant Commit")]
 		[Tooltip("If true, changes to the database will be committed immediately. If false, changes will be batched and committed periodically.")]
@@ -160,7 +160,6 @@ namespace Universe.World {
 			if(loadPhysical) {
 				_ = entityComp.LoadChunkData();
 			}
-			entityComp.RequestMeshRebuild();
 			Debug.Log($"Loaded entity {data.EntityName} with DB ID {data.UID} into scene.");
 			return Task.FromResult(data);
 		}
@@ -179,7 +178,7 @@ namespace Universe.World {
 						Debug.LogWarning($"Entity {entityUID} is marked as loaded but could not find the component in the scene.");
 					}
 					if(unloadPhysicalOnly) {
-						entity.RequestTeardown();
+						entity.RequestMeshRebuild();
 					} else {
 						Destroy(entity.gameObject);
 						_activeEntities.Remove(entityUID);

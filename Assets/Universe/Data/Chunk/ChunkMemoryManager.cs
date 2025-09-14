@@ -391,6 +391,10 @@ namespace Universe.Data.Chunk {
 		#region Block Access Methods
 
 		public int GetRawData(long chunkID, int blockIndex) {
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return 0;
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			int globalIndex = allocation.PoolIndex * BlocksPerChunk + blockIndex;
@@ -398,6 +402,10 @@ namespace Universe.Data.Chunk {
 		}
 
 		public void SetRawData(long chunkID, int blockIndex, int rawData) {
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return;
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			MarkChunkDirty(chunkID);
@@ -406,6 +414,10 @@ namespace Universe.Data.Chunk {
 		}
 
 		public int[] GetRawDataArray(long chunkID) {
+			/*if(!EnsureChunkAccessible(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return null;
+			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			int startIndex = allocation.PoolIndex * BlocksPerChunk;
@@ -419,19 +431,62 @@ namespace Universe.Data.Chunk {
 				return;
 			}
 
+			/*if(!EnsureChunkAccessibleAsync(chunkID).Result) {
+				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+				return;
+			}*/
+
 			ChunkAllocation allocation = _allocations[chunkID];
 			UpdateLastAccessTime(chunkID);
 			MarkChunkDirty(chunkID);
 
 			int startIndex = allocation.PoolIndex * BlocksPerChunk;
 			var slice = _uncompressedPool.GetSubArray(startIndex, BlocksPerChunk);
+
 			slice.CopyFrom(data);
 		}
 
 		#endregion
 
 		#region Compression Management
-		
+
+		/**
+		* Ensures the specified chunk is accessible for reading/writing. If the chunk is compressed, it will be decompressed asynchronously.
+		*/
+		public async Task<bool> EnsureChunkAccessible(long chunkID) {
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+				Debug.LogError($"Chunk {chunkID} not allocated!");
+				return false;
+			}
+
+			// If already uncompressed, we're good
+			if(allocation.State == ChunkState.Uncompressed) {
+				return true;
+			}
+
+			// If compressed, decompress asynchronously
+			if(allocation.State == ChunkState.Compressed) {
+				/*if (CompressionManager != null) {
+					return await DecompressChunk(chunkID);
+				}*/
+				return false;
+			}
+
+			// If currently being processed, wait for operation
+			if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
+				Debug.LogWarning($"Chunk {chunkID} is being processed, waiting for access (async)");
+				// Wait asynchronously for the operation to complete
+				if(_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) {
+					try {
+						return await op.CompletionSource.Task;
+					} catch {
+						return false;
+					}
+				}
+			}
+			return false;
+		}
+
 		public async Task<bool> CompressChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
 				return false;
