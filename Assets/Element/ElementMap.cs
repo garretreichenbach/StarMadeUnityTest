@@ -15,6 +15,7 @@ namespace Element {
 		static string BlockConfigPath;
 
 		public static List<ElementInfo> AllElements { get; private set; }
+
 		static readonly Dictionary<short, string> TypeIdByName = new Dictionary<short, string>();
 		public static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
 		static bool _loadedTypes;
@@ -140,7 +141,7 @@ namespace Element {
 							ElementNameLookup[info.IdName.Trim()] = info;
 						}
 					} catch(Exception ex) {
-						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.InnerXml}\n{ex}");
+						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
 					}
 				}
 			}
@@ -192,7 +193,7 @@ namespace Element {
 				int idx = trimmed.IndexOf('=');
 				if(idx <= 0 || idx == trimmed.Length - 1) continue;
 				string idName = trimmed[..idx].Trim();
-				short typeId = (short) int.Parse(trimmed[(idx + 1)..].Trim());
+				short typeId = (short)int.Parse(trimmed[(idx + 1)..].Trim());
 				if(typeId > maxId) maxId = typeId;
 				if(!TypeIdByName.ContainsKey(typeId)) {
 					TypeIdByName[typeId] = idName;
@@ -204,6 +205,8 @@ namespace Element {
 
 	[CustomEditor(typeof(ElementMap), false)]
 	public class ElementsGUI : Editor {
+		private int selectedElementIndex = 0;
+
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
 			GUILayout.Label("Element Types", EditorStyles.boldLabel);
@@ -224,6 +227,30 @@ namespace Element {
 				ElementMap.WriteElementConfig();
 			}
 			GUILayout.EndHorizontal();
+
+			// Dropdown for ElementInfo
+			GUILayout.Space(10);
+			GUILayout.Label("Browse Elements", EditorStyles.boldLabel);
+			var allElements = ElementMap.AllElements;
+			if(allElements != null && allElements.Count > 0) {
+				string[] displayNames = allElements.Select(e => e?.IdName ?? "<null>").ToArray();
+				selectedElementIndex = EditorGUILayout.Popup("Element", selectedElementIndex, displayNames);
+				if(selectedElementIndex >= 0 && selectedElementIndex < allElements.Count) {
+					ElementInfo selected = allElements[selectedElementIndex];
+					if(selected != null) {
+						GUILayout.Space(5);
+						GUILayout.Label($"TypeId: {selected.TypeId}");
+						GUILayout.Label($"IdName: {selected.IdName}");
+						GUILayout.Label($"Name: {selected.Name}");
+						GUILayout.Label($"IconId: {selected.IconId}");
+						GUILayout.Label($"TextureIds: {string.Join(", ", selected.TextureIds ?? Array.Empty<short>())}");
+						GUILayout.Label($"Description: {selected.Description}");
+						// Add more fields as needed
+					}
+				}
+			} else {
+				GUILayout.Label("No elements loaded.");
+			}
 		}
 	}
 
