@@ -36,6 +36,7 @@ namespace Universe.Data.Player {
 				return;
 			}
 			if(!_controlState.InventoryActive) {
+				//Todo: Proper player input controller
 				HandleMovement();
 				HandleLook();
 				HandleBlockInput();
@@ -131,13 +132,14 @@ namespace Universe.Data.Player {
 			if(Physics.Raycast(ray, out RaycastHit hit, 5f)) {
 				Vector3 placePos = hit.point + hit.normal * 0.5f;
 				placePos = new Vector3(Mathf.Round(placePos.x), Mathf.Round(placePos.y), Mathf.Round(placePos.z));
-
+				//Todo: Place block at placePos
 			}
 		}
 
 		public void RemoveBlock() {
 			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
 			if(Physics.Raycast(ray, out RaycastHit hit, 5f)) {
+				//Todo: Remove block
 			}
 		}
 
