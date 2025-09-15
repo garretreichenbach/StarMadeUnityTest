@@ -41,7 +41,7 @@ namespace Settings {
 			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
 				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
 			}
-			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/server.json");
+			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/Server.json");
 			LoadSettings();
 		}
 

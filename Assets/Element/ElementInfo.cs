@@ -1,18 +1,223 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Xml.Serialization;
+using System.Xml;
+using System.Linq;
+using System.Text;
+using UnityEditor;
+using UnityEngine;
 
 namespace Element {
-	public struct ElementInfo {
-		//Todo: Port the rest of the fields from BlockConfig.xml
-		public short TypeId { get; private set; }
+	public class ElementMap : MonoBehaviour {
+		static readonly string BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
+		static readonly string BlockConfigPath = Path.Combine(Application.persistentDataPath, "Config", "BlockConfig.xml");
+
+		public static ElementInfo[] AllElements { get; private set; }
+
+		static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
+		static bool _loadedTypes;
+		static bool _loadedConfig;
+		static ElementCategory _configRoot;
+
+		[MenuItem("Tools/Regenerate Elements Enum")]
+		public static void RegenerateEnum() {
+			LoadElementTypes();
+			LoadElementConfig();
+			if(AllElements == null || AllElements.Length == 0) {
+				Debug.LogWarning("ElementMap.RegenerateEnum: AllElements is null or empty. Make sure BlockTypes.properties exists and is valid.");
+				return;
+			}
+			var sb = new StringBuilder();
+			sb.AppendLine("namespace Element {");
+			sb.AppendLine("    public enum Elements {");
+			sb.AppendLine("        NONE = 0,");
+			for(int i = 0; i < AllElements.Length; i++) {
+				var element = AllElements[i];
+				if(element != null) {
+					sb.AppendLine($"        {element.IdName} = {element.TypeId},");
+				}
+			}
+			sb.AppendLine("    }");
+			sb.AppendLine("}");
+			File.WriteAllText("Assets/Element/Elements.cs", sb.ToString());
+			AssetDatabase.Refresh();
+		}
+
+		public static ElementInfo GetInfo(short id) {
+			return AllElements[id];
+		}
+
+		public static ElementInfo GetInfo(string name) {
+			return ElementNameLookup[name.ToLower().Trim()];
+		}
+
+		/**
+		* Writes the BlockTypes.properties file in Java .properties format (IDNAME=short_id).
+		*/
+		public static void WriteElementTypes() {
+			if(AllElements == null || AllElements.Length == 0) return;
+			var sb = new StringBuilder();
+			var seen = new HashSet<string>();
+			for(int i = 0; i < AllElements.Length; i++) {
+				var element = AllElements[i];
+				if(element == null || string.IsNullOrWhiteSpace(element.IdName)) continue;
+				if(seen.Contains(element.IdName)) continue;
+				seen.Add(element.IdName);
+				sb.AppendLine($"{element.IdName}={element.TypeId}");
+			}
+			File.WriteAllText(BlockTypesPath, sb.ToString());
+		}
+
+		/**
+		* Loads the ElementConfig.xml file from the default location, or the given byte array if one is provided.
+		*/
+		public static void LoadElementConfig(byte[] data = null) {
+			if(!_loadedTypes) {
+				LoadElementTypes();
+			}
+			XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute("Config"));
+			//Only get the elements under Config > Element
+			var root = new XmlDocument();
+			root.LoadXml(data == null ? File.ReadAllText(BlockConfigPath) : Encoding.UTF8.GetString(data));
+			if(root.SelectSingleNode("Config/Element") is XmlElement elementNode) _configRoot = (ElementCategory) serializer.Deserialize(new XmlNodeReader(elementNode));
+			ProcessCategoryTree(_configRoot);
+			_loadedConfig = true;
+		}
+
+		static void ProcessCategoryTree(ElementCategory category) {
+			if(category.ChildCategoriesRaw != null) {
+				foreach(XmlElement elem in category.ChildCategoriesRaw) {
+					if(elem.Name == "Block") continue; // Already handled
+					if(string.Equals(elem.Name, "recipes", StringComparison.OrdinalIgnoreCase)) continue; // Ignore recipes category and its children
+					var serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(elem.Name));
+					using(var reader = new XmlNodeReader(elem)) {
+						try {
+							var child = (ElementCategory)serializer.Deserialize(reader);
+							child.Name = elem.Name;
+							ProcessCategoryTree(child);
+							category.ChildCategories.Add(child);
+						} catch(Exception exception) {
+							Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to deserialize {elem.Name} category: {exception}");
+							//BlockConfig.xml has a bunch of old recipe stuff in it at the end, we can just ignore it
+						}
+					}
+				}
+			}
+		}
+
+		/**
+		* Writes the ElementConfig.xml file to the default location, or the given byte array if one is provided.
+		*/
+		public static void WriteElementConfig(byte[] data = null) {
+			if(!_loadedConfig) {
+				return;
+			}
+			XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute("Config"));
+			serializer.Serialize(new MemoryStream(data ?? File.ReadAllBytes(BlockConfigPath)), _configRoot);
+		}
+
+		/**
+		* Loads the BlockTypes.properties file and populates AllElements and ElementNameLookup.
+		*/
+		public static void LoadElementTypes() {
+			if(!File.Exists(BlockTypesPath)) {
+				Debug.LogWarning($"ElementMap.LoadElementTypes: {BlockTypesPath} does not exist. AllElements will be empty.");
+				AllElements = Array.Empty<ElementInfo>();
+				ElementNameLookup.Clear();
+				_loadedTypes = false;
+				return;
+			}
+			var lines = File.ReadAllLines(BlockTypesPath);
+			if(lines.Length == 0) {
+				Debug.LogWarning($"ElementMap.LoadElementTypes: {BlockTypesPath} is empty. AllElements will be empty.");
+				AllElements = Array.Empty<ElementInfo>();
+				ElementNameLookup.Clear();
+				_loadedTypes = false;
+				return;
+			}
+			var tempList = new List<(string idName, short typeId)>();
+			short maxId = 0;
+			foreach(var line in lines) {
+				var trimmed = line.Trim();
+				if(string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#") || trimmed.StartsWith(";")) continue;
+				var idx = trimmed.IndexOf('=');
+				if(idx <= 0 || idx == trimmed.Length - 1) continue;
+				var idName = trimmed.Substring(0, idx).Trim();
+				if(!short.TryParse(trimmed.Substring(idx + 1).Trim(), out var typeId)) continue;
+				if(typeId > maxId) maxId = typeId;
+				tempList.Add((idName, typeId));
+			}
+			if(tempList.Count == 0) {
+				Debug.LogWarning($"ElementMap.LoadElementTypes: No valid entries found in {BlockTypesPath}. AllElements will be empty.");
+				AllElements = Array.Empty<ElementInfo>();
+				ElementNameLookup.Clear();
+				_loadedTypes = false;
+				return;
+			}
+			AllElements = new ElementInfo[maxId + 1];
+			ElementNameLookup.Clear();
+			foreach(var (idName, typeId) in tempList) {
+				var info = new ElementInfo();
+				var typeIdField = typeof(ElementInfo).GetField("TypeId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+				var idNameField = typeof(ElementInfo).GetField("IdName", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+				if(typeIdField != null) typeIdField.SetValue(info, typeId);
+				if(idNameField != null) idNameField.SetValue(info, idName);
+				AllElements[typeId] = info;
+				ElementNameLookup[idName.ToLower().Trim()] = info;
+			}
+			_loadedTypes = true;
+		}
+	}
+
+	[CustomEditor(typeof(ElementMap), false)]
+	public class ElementsGUI : Editor {
+		public override void OnInspectorGUI() {
+			DrawDefaultInspector();
+			GUILayout.Label("Element Types", EditorStyles.boldLabel);
+			GUILayout.BeginHorizontal();
+			if(GUILayout.Button("Load Element Types")) {
+				ElementMap.LoadElementTypes();
+			}
+			if(GUILayout.Button("Save Element Types")) {
+				ElementMap.WriteElementConfig();
+			}
+			GUILayout.EndHorizontal();
+			GUILayout.Label("Element Config", EditorStyles.boldLabel);
+			GUILayout.BeginHorizontal();
+			if(GUILayout.Button("Load Element Config")) {
+				ElementMap.LoadElementConfig();
+			}
+			if(GUILayout.Button("Save Element Config")) {
+				ElementMap.WriteElementConfig();
+			}
+			GUILayout.EndHorizontal();
+		}
+	}
+
+	[XmlRoot("Block")]
+	public class ElementInfo {
+		[XmlIgnore]
+		public short TypeId { get; set; }
 		[XmlAttribute("icon")]
-		public int IconId { get; private set; }
+		public int IconId { get; set; }
 		[XmlAttribute("name")]
-		public string Name { get; private set; }
+		public string Name { get; set; }
+
 		[XmlAttribute("textureId")]
-		public short[] TextureIds { get; set; }
+		string TextureIdString {
+			get => string.Join(", ", TextureIds ?? Array.Empty<short>());
+			set => TextureIds = value?.Split(',').Select(s => short.Parse(s.Trim())).ToArray();
+		}
+
+		[XmlIgnore]
+		public short[] TextureIds {
+			get => TextureIdString?.Split(',').Select(s => short.Parse(s.Trim())).ToArray() ?? Array.Empty<short>();
+			set => TextureIdString = string.Join(", ", value);
+		}
+
 		[XmlAttribute("type")]
-		public string IdName { get; private set; }
+		public string IdName { get; set; }
 		[XmlElement("Consistence")]
 		public Recipe Consistence { get; set; }
 		[XmlElement("ChamberPrerequisites")]
@@ -135,22 +340,28 @@ namespace Element {
 		public bool IsLogicBlockButton { get; set; }
 	}
 
-	[XmlRoot]
-	public struct ElementCategory {
-		public string name;
-		public ElementCategory[] parents;
-		public List<ElementCategory> childCategories;
-		public List<ElementInfo> members;
+	public class ElementCategory {
+		[XmlIgnore]
+		public string Name { get; set; }
+
+		[XmlElement("Block")]
+		public List<ElementInfo> Blocks { get; set; } = new List<ElementInfo>();
+
+		[XmlAnyElement]
+		public List<XmlElement> ChildCategoriesRaw { get; set; }
+
+		[XmlIgnore]
+		public List<ElementCategory> ChildCategories { get; set; } = new List<ElementCategory>();
 	}
 
 	[XmlRoot("Consistence")]
-	public struct Recipe {
+	public class Recipe {
 		[XmlElement("Item")]
 		public List<ItemStack> Items { get; set; }
 	}
 
 	[XmlRoot("Item")]
-	public struct ItemStack {
+	public class ItemStack {
 		[XmlAttribute("count")]
 		public int Count { get; set; }
 		[XmlText]
@@ -161,13 +372,12 @@ namespace Element {
 		}
 	}
 
-	[XmlRoot("EffectArmor")]
-	public struct EffectArmor {
-		[XmlText(Type = typeof(float))]
-		public float Heat;
-		[XmlText(Type = typeof(float))]
-		public float Kinetic;
-		[XmlText(Type = typeof(float))]
-		public float EM;
+	public class EffectArmor {
+		[XmlElement("Heat")]
+		public float Heat { get; set; }
+		[XmlElement("Kinetic")]
+		public float Kinetic { get; set; }
+		[XmlElement("EM")]
+		public float EM { get; set; }
 	}
 }
