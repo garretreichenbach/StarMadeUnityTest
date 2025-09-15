@@ -30,7 +30,7 @@ namespace Dev.Testing.Terrain {
 				FactionID = 0,
 				SectorID = 0,
 				ChunkLoaded = true,
-				UID = asteroidGo.name,
+				Uid = asteroidGo.name,
 			};
 			EntityDatabaseManager.Instance.InsertEntity(entity);
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);

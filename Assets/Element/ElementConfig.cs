@@ -4,13 +4,12 @@ using System.IO;
 using System.Xml.Serialization;
 using System.Xml;
 using System.Linq;
-using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
 
 namespace Element {
-	public class ElementMap : MonoBehaviour {
+	public class ElementConfig {
 		static string BlockTypesPath;
 		static string BlockConfigPath;
 
@@ -21,19 +20,14 @@ namespace Element {
 		static bool _loadedTypes;
 		static bool _loadedConfig;
 		public static ElementCategory ConfigRoot;
+		public static ElementConfig Instance { get; private set; } = new ElementConfig();
 
-		void Awake() {
-			BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
-			BlockConfigPath = Path.Combine(Application.persistentDataPath, "Config", "BlockConfig.xml");
+		public ElementConfig() {
+			BlockTypesPath = Path.Combine(Application.dataPath, "Element", "BlockTypes.properties");
+			BlockConfigPath = Path.Combine(Application.dataPath, "Element", "BlockConfig.xml");
 		}
 
-		void Start() {
-			//Todo: Load these only when a world is loaded
-			LoadElementTypes();
-			LoadElementConfig();
-		}
-
-		[MenuItem("Tools/Regenerate Elements Enum")]
+		/*[MenuItem("Tools/Regenerate Elements Enum")]
 		public static void RegenerateEnum() {
 			LoadElementTypes();
 			if(TypeIdByName == null || TypeIdByName.Count == 0) {
@@ -51,7 +45,7 @@ namespace Element {
 			sb.AppendLine("}");
 			File.WriteAllText("Assets/Element/Elements.cs", sb.ToString());
 			AssetDatabase.Refresh();
-		}
+		}*/
 
 		public static ElementInfo GetInfo(short id) {
 			return AllElements[id];
@@ -64,7 +58,7 @@ namespace Element {
 		/**
 		* Writes the BlockTypes.properties file in Java .properties format (IDNAME=short_id).
 		*/
-		public static void WriteElementTypes() {
+		public void WriteElementTypes() {
 			if(AllElements == null || !AllElements.Any()) return;
 			var sb = new StringBuilder();
 			var seen = new HashSet<string>();
@@ -80,7 +74,7 @@ namespace Element {
 		/**
 		* Loads the ElementConfig.xml file from the default location, or the given byte array if one is provided.
 		*/
-		public static void LoadElementConfig(byte[] data = null) {
+		public void LoadElementConfig(byte[] data = null) {
 			if(!_loadedTypes) {
 				LoadElementTypes();
 			}
@@ -157,7 +151,7 @@ namespace Element {
 		/**
 		* Writes the ElementConfig.xml file to the default location, or the given byte array if one is provided.
 		*/
-		public static void WriteElementConfig(byte[] data = null) {
+		public void WriteElementConfig(byte[] data = null) {
 			if(!_loadedConfig) {
 				return;
 			}
@@ -168,7 +162,7 @@ namespace Element {
 		/**
 		* Loads the BlockTypes.properties file and populates AllElements and ElementNameLookup.
 		*/
-		public static void LoadElementTypes() {
+		public void LoadElementTypes() {
 			TypeIdByName.Clear();
 			if(!File.Exists(BlockTypesPath)) {
 				throw new FileNotFoundException($"ElementMap.LoadElementTypes: {BlockTypesPath} does not exist.");
@@ -192,49 +186,56 @@ namespace Element {
 			}
 			_loadedTypes = true;
 		}
+
+		public void Read(BinaryReader reader) {
+			int length = reader.ReadInt32();
+			if(length <= 0) throw new Exception("ElementMap.Read: Invalid length for ElementConfig data.");
+			byte[] data = reader.ReadBytes(length);
+			LoadElementConfig(data);
+		}
 	}
 
-	[CustomEditor(typeof(ElementMap), false)]
+	[CustomEditor(typeof(ElementConfig), false)]
 	public class ElementsGUI : Editor {
-		Dictionary<ElementCategory, bool> foldoutStates = new Dictionary<ElementCategory, bool>();
-		ElementInfo selectedElement = null;
-		string searchString = "";
+		readonly Dictionary<ElementCategory, bool> foldoutStates = new Dictionary<ElementCategory, bool>();
+		ElementInfo _selectedElement;
+		string _searchString = "";
 
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
 			GUILayout.Label("Element Types", EditorStyles.boldLabel);
 			GUILayout.BeginHorizontal();
 			if(GUILayout.Button("Load Element Types")) {
-				ElementMap.LoadElementTypes();
+				ElementConfig.Instance.LoadElementTypes();
 			}
 			if(GUILayout.Button("Save Element Types")) {
-				ElementMap.WriteElementTypes();
+				ElementConfig.Instance.WriteElementTypes();
 			}
 			GUILayout.EndHorizontal();
 			GUILayout.Label("Element Config", EditorStyles.boldLabel);
 			GUILayout.BeginHorizontal();
 			if(GUILayout.Button("Load Element Config")) {
-				ElementMap.LoadElementConfig();
+				ElementConfig.Instance.LoadElementConfig();
 			}
 			if(GUILayout.Button("Save Element Config")) {
-				ElementMap.WriteElementConfig();
+				ElementConfig.Instance.WriteElementConfig();
 			}
 			GUILayout.EndHorizontal();
 
 			GUILayout.Space(10);
 			GUILayout.Label("Browse Elements (by Category)", EditorStyles.boldLabel);
-			searchString = EditorGUILayout.TextField("Search", searchString);
-			if(ElementMap.ConfigRoot != null) {
-				DrawCategory(ElementMap.ConfigRoot, 0, searchString);
+			_searchString = EditorGUILayout.TextField("Search", _searchString);
+			if(ElementConfig.ConfigRoot != null) {
+				DrawCategory(ElementConfig.ConfigRoot, 0, _searchString);
 			}
 
-			if(selectedElement != null) {
+			if(_selectedElement != null) {
 				GUILayout.Space(10);
-				GUILayout.Label($"TypeId: {selectedElement.TypeId}");
-				GUILayout.Label($"IdName: {selectedElement.IdName}");
-				GUILayout.Label($"Name: {selectedElement.Name}");
-				GUILayout.Label($"IconId: {selectedElement.IconId}");
-				GUILayout.Label($"TextureIds: {string.Join(", ", selectedElement.TextureIds ?? Array.Empty<short>())}");
+				GUILayout.Label($"TypeId: {_selectedElement.TypeId}");
+				GUILayout.Label($"IdName: {_selectedElement.IdName}");
+				GUILayout.Label($"Name: {_selectedElement.Name}");
+				GUILayout.Label($"IconId: {_selectedElement.IconId}");
+				GUILayout.Label($"TextureIds: {string.Join(", ", _selectedElement.TextureIds ?? Array.Empty<short>())}");
 			}
 		}
 
@@ -256,7 +257,7 @@ namespace Element {
 						if(!BlockMatchesSearch(block, search)) continue;
 						anyBlockVisible = true;
 						if(GUILayout.Button(block.IdName ?? "<null>", EditorStyles.miniButton)) {
-							selectedElement = block;
+							_selectedElement = block;
 						}
 					}
 				}
@@ -493,7 +494,7 @@ namespace Element {
 		public string Name { get; set; }
 
 		public ElementInfo GetInfo() {
-			return ElementMap.GetInfo(Name);
+			return ElementConfig.GetInfo(Name);
 		}
 	}
 

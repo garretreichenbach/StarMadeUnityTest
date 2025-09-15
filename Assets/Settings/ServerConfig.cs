@@ -2,14 +2,38 @@
 using System.IO;
 using Unity.VisualScripting;
 using UnityEngine;
+using Universe.Data;
 
 namespace Settings {
 	[Serializable]
-	public class ServerSettings : MonoBehaviour {
+	public class ServerConfig {
 
 		string _settingsFilePath;
 
+		public static ServerConfig Instance { get; private set; } = new ServerConfig();
+
+		#region ServerInfo
+
+		[Header("Server Info")]
+		[InspectorLabel("Server Name")]
+		[Tooltip("The name of the server as it will appear in server lists.")]
+		public StringSettingsValue ServerName = new StringSettingsValue("Server Name", "The name of the server as it will appear in server lists.", "New Server");
+
+		[InspectorLabel("Server IP")]
+		[Tooltip("The IP address of the server. Leave empty for automatic detection.")]
+		public StringSettingsValue ServerIP = new StringSettingsValue("Server IP", "The IP address of the server.", "");
+
+		[InspectorLabel("Server Port")]
+		[Tooltip("The port the server will listen on for incoming connections.")]
+		public IntSettingsValue ServerPort = new IntSettingsValue("Server Port", "The port the server will listen on for incoming connections.", 4242, 1024, 65535);
+
+		#endregion
+
 		#region World Settings
+
+		[Header("World Name")]
+		[Tooltip("The name of the world to use.")]
+		public StringSettingsValue WorldName = new StringSettingsValue("World Name", "The name of the world to use.", "world0");
 
 		[Header("World Settings")]
 		[InspectorLabel("Instant Commit")]
@@ -33,17 +57,6 @@ namespace Settings {
 		public IntSettingsValue GalaxyRadius = new IntSettingsValue("Galaxy Radius", "Radius of the Galaxy in systems.", 256, 100, 1000);
 
 		#endregion
-
-		public static ServerSettings Instance { get; private set; }
-
-		void Awake() {
-			Instance = this;
-			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
-				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
-			}
-			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/Server.json");
-			LoadSettings();
-		}
 
 		/**
 		* Loads the settings from the config file.
@@ -103,6 +116,23 @@ namespace Settings {
 			if(dict.ContainsKey("SectorSize")) SectorSize.SetValue(Convert.ToInt32(dict["SectorSize"]));
 			if(dict.ContainsKey("SystemSize")) SystemSize.SetValue(Convert.ToInt32(dict["SystemSize"]));
 			if(dict.ContainsKey("GalaxyRadius")) GalaxyRadius.SetValue(Convert.ToInt32(dict["GalaxyRadius"]));
+		}
+
+		public ServerConfig LoadServerConfig() {
+			if(Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
+				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
+			}
+			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/Server.json");
+			LoadSettings();
+			return this;
+		}
+
+		public void Read(BinaryReader reader) {
+			InstantCommit.SetValue(reader.ReadBoolean());
+			DatabaseAutoCommitInterval.SetValue(reader.ReadSingle());
+			SectorSize.SetValue(reader.ReadInt32());
+			SystemSize.SetValue(reader.ReadInt32());
+			GalaxyRadius.SetValue(reader.ReadInt32());
 		}
 	}
 }

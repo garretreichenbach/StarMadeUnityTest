@@ -34,7 +34,7 @@ namespace Universe.Data.Chunk {
 
         public void EnqueueModification(GameEntity.GameEntity entity, int chunkIndex, int blockIndex, int newType) {
             if(entity == null) return;
-            string key = BuildKey(entity.UID, chunkIndex, blockIndex);
+            string key = BuildKey(entity.Uid, chunkIndex, blockIndex);
             var mod = new BlockModification { Entity = entity, ChunkIndex = chunkIndex, BlockIndex = blockIndex, NewType = (short)newType };
             lock(_lock) {
                 // overwrite if exists -> last write wins
@@ -73,7 +73,7 @@ namespace Universe.Data.Chunk {
                     // Only write if value actually changes (reduces churn)
                     if(chunk.GetBlockType(mod.BlockIndex) == mod.NewType) continue;
                     chunk.SetBlockType(mod.BlockIndex, mod.NewType);
-                    modifiedEntities.Add(mod.Entity.UID);
+                    modifiedEntities.Add(mod.Entity.Uid);
                 } catch(Exception ex) {
                     Debug.LogError($"BlockModificationQueue: Failed to apply modification: {ex}");
                 }

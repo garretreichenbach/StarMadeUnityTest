@@ -14,18 +14,10 @@ namespace Universe.World {
 	* Manages the saving and loading of game entities to and from the database using LiteDB.
 	*/
 	public class EntityDatabaseManager : MonoBehaviour {
-		
-		[Header("Database Settings")]
-		[InspectorLabel("Instant Commit")]
-		[Tooltip("If true, changes to the database will be committed immediately. If false, changes will be batched and committed periodically.")]
-		public bool InstantCommit => ServerSettings.Instance.InstantCommit.Value;
+		float CommitInterval => ServerConfig.Instance.DatabaseAutoCommitInterval.Value;
 
-		[InspectorLabel("Auto Commit Interval (seconds)")]
-		[Tooltip("If Instant Commit is false, this is the interval in seconds at which changes will be committed to the database.")]
-		public float CommitInterval => ServerSettings.Instance.DatabaseAutoCommitInterval.Value;
-
-		bool _needsCommit = false;
-		float _commitTimer = 0f;
+		bool _needsCommit;
+		float _commitTimer;
 
 		[Header("Database Stats")]
 		[InspectorLabel("Current Total Entities")]
@@ -100,7 +92,7 @@ namespace Universe.World {
 		SQLiteConnection _db;
 
 		// Write queue for chunk data
-		class WriteRequest {
+		struct WriteRequest {
 			public string Path;
 			public byte[] Data;
 			public TaskCompletionSource<bool> Completion;
@@ -110,22 +102,12 @@ namespace Universe.World {
 		CancellationTokenSource _writeCts = new CancellationTokenSource();
 		Task _writeTask;
 
-		void Awake() {
-			if(Instance != null && Instance != this) {
-				Destroy(this);
-			} else {
-				Instance = this;
-				_activeEntities = new Dictionary<string, GameEntity>();
-				InitDB();
-			}
-		}
-
 		void Start() {
 			_writeTask = Task.Run(ProcessWriteQueue);
 		}
 
 		void Update() {
-			if(!InstantCommit && _needsCommit) {
+			if(_needsCommit) {
 				_commitTimer += Time.deltaTime;
 				if(_commitTimer >= CommitInterval) {
 					_db.Commit();
@@ -137,17 +119,17 @@ namespace Universe.World {
 		}
 
 		async Task ProcessWriteQueue() {
-			while (!_writeCts.Token.IsCancellationRequested) {
-				if (_writeQueue.TryDequeue(out var req)) {
+			while(!_writeCts.Token.IsCancellationRequested) {
+				if(_writeQueue.TryDequeue(out var req)) {
 					var sw = System.Diagnostics.Stopwatch.StartNew();
 					try {
 						var folderPath = System.IO.Path.GetDirectoryName(req.Path);
-						if (!System.IO.Directory.Exists(folderPath)) {
+						if(!System.IO.Directory.Exists(folderPath)) {
 							System.IO.Directory.CreateDirectory(folderPath);
 						}
 						await System.IO.File.WriteAllBytesAsync(req.Path, req.Data);
 						req.Completion.SetResult(true);
-					} catch (System.Exception ex) {
+					} catch(System.Exception ex) {
 						Debug.LogError($"[WriteQueue] Failed to write chunk data to {req.Path}: {ex}");
 						req.Completion.SetResult(false);
 					}
@@ -176,11 +158,11 @@ namespace Universe.World {
 		* Note: This does not load the entity's block data, just the entity data itself
 		*/
 		public Task<GameEntity.GameEntityData> LoadEntity(string UID, bool loadPhysical = false) {
-			GameEntity.GameEntityData data = _db.Find<GameEntity.GameEntityData>(e => e.UID == UID);
+			GameEntity.GameEntityData data = _db.Find<GameEntity.GameEntityData>(e => e.Uid == UID);
 			//Check if entity already exists in scene
-			GameObject entityObj = GameObject.Find(data.UID); //Todo: Change this to a more efficient lookup
+			GameObject entityObj = GameObject.Find(data.Uid); //Todo: Change this to a more efficient lookup
 			if(entityObj == null) {
-				entityObj = new GameObject(data.UID);
+				entityObj = new GameObject(data.Uid);
 			}
 			GameEntity entityComp = null;
 			switch(data.EntityType) {
@@ -189,16 +171,16 @@ namespace Universe.World {
 					break;
 			}
 			if(entityComp == null) {
-				Debug.LogError($"Failed to load entity of type {data.EntityType} for entity ID {data.UID}");
-				throw new System.Exception($"Failed to create entity of type {data.EntityType} for entity ID {data.UID}");
+				Debug.LogError($"Failed to load entity of type {data.EntityType} for entity ID {data.Uid}");
+				throw new System.Exception($"Failed to create entity of type {data.EntityType} for entity ID {data.Uid}");
 			}
 			entityComp.Data = data;
-			_activeEntities[data.UID].Data = data;
+			_activeEntities[data.Uid].Data = data;
 			entityComp.Data = data;
 			if(loadPhysical) {
 				_ = entityComp.LoadChunkData();
 			}
-			Debug.Log($"Loaded entity {data.EntityName} with DB ID {data.UID} into scene.");
+			Debug.Log($"Loaded entity {data.EntityName} with DB ID {data.Uid} into scene.");
 			return Task.FromResult(data);
 		}
 
@@ -223,11 +205,7 @@ namespace Universe.World {
 					}
 				}
 				_db.Update(entity.Data);
-				if(InstantCommit) {
-					_db.Commit();
-				} else {
-					_needsCommit = true;
-				}
+				_needsCommit = true;
 			} else {
 				Debug.LogWarning($"Entity ID {entityUID} not found in active entities.");
 			}
@@ -267,7 +245,7 @@ namespace Universe.World {
 		}
 
 		public async Task FlushChunkDataWrites() {
-			while (!_writeQueue.IsEmpty) {
+			while(!_writeQueue.IsEmpty) {
 				await Task.Delay(10);
 			}
 		}
@@ -293,13 +271,9 @@ namespace Universe.World {
 		*/
 		public void InsertEntity(GameEntity entity) {
 			_db.Insert(entity.Data);
-			if(InstantCommit) {
-				_db.Commit();
-			} else {
-				_needsCommit = true;
-			}
-			_activeEntities.Add(entity.UID, entity);
-			Debug.Log($"Inserted entity {entity.Name} with UID {entity.UID} into database.");
+			_needsCommit = true;
+			_activeEntities.Add(entity.Uid, entity);
+			Debug.Log($"Inserted entity {entity.Name} with UID {entity.Uid} into database.");
 		}
 
 		public async Task<bool> RemoveEntity(string uid) {
@@ -307,11 +281,7 @@ namespace Universe.World {
 				await UnloadEntity(uid);
 				_activeEntities.Remove(uid);
 				_db.Delete<GameEntity.GameEntityData>(uid);
-				if(InstantCommit) {
-					_db.Commit();
-				} else {
-					_needsCommit = true;
-				}
+				_needsCommit = true;
 				Debug.Log($"Removed entity {uid} from database.");
 				return true;
 			}
@@ -321,7 +291,7 @@ namespace Universe.World {
 
 		void OnDestroy() {
 			FlushChunkDataWrites().Wait();
-			 _writeCts.Cancel();
+			_writeCts.Cancel();
 			_writeTask?.Wait(1000);
 			_writeTask = null;
 			_writeCts.Dispose();

@@ -27,7 +27,7 @@ namespace Universe.Data.Chunk {
 			for(int i = 0; i < toStart; i++) {
 				GameEntity.GameEntity entity = _queue.Dequeue();
 				if(entity == null) continue;
-				if(_ongoing.ContainsKey(entity.UID)) continue; // already building
+				if(_ongoing.ContainsKey(entity.Uid)) continue; // already building
 				StartAsyncRebuild(entity);
 			}
 
@@ -47,7 +47,7 @@ namespace Universe.Data.Chunk {
 				try {
 					FinalizeRebuild(state);
 				} catch(Exception ex) {
-					Debug.LogError($"ChunkGenerationQueue: error finalizing rebuild for {state.Entity.UID}: {ex}");
+					Debug.LogError($"ChunkGenerationQueue: error finalizing rebuild for {state.Entity.Uid}: {ex}");
 				}
 				_ongoing.Remove(key);
 				finalized++;
@@ -57,7 +57,7 @@ namespace Universe.Data.Chunk {
 		void StartAsyncRebuild(GameEntity.GameEntity entity) {
 			int chunksTotal = Math.Max(0, entity.ChunkCount);
 			if(chunksTotal == 0) {
-				Debug.LogWarning($"ChunkGenerationQueue: Entity {entity.UID} has no chunks - skipping rebuild");
+				Debug.LogWarning($"ChunkGenerationQueue: Entity {entity.Uid} has no chunks - skipping rebuild");
 				return;
 			}
 			var tasks = new Task<ChunkBuilder.MeshDataRaw>[chunksTotal];
@@ -70,12 +70,12 @@ namespace Universe.Data.Chunk {
 				try {
 					tasks[i] = ChunkBuilder.BuildChunkAsync(chunk);
 				} catch(Exception ex) {
-					Debug.LogError($"ChunkGenerationQueue: failed to start async build for {entity.UID} chunk {i}: {ex}");
+					Debug.LogError($"ChunkGenerationQueue: failed to start async build for {entity.Uid} chunk {i}: {ex}");
 					tasks[i] = null;
 				}
 			}
 			var state = new RebuildState { Entity = entity, Tasks = tasks, ChunksTotal = chunksTotal};
-			_ongoing[entity.UID] = state;
+			_ongoing[entity.Uid] = state;
 		}
 
 		void FinalizeRebuild(RebuildState state) {
@@ -87,7 +87,7 @@ namespace Universe.Data.Chunk {
 				var task = state.Tasks[i];
 				if(task == null) continue;
 				if(task.IsFaulted) {
-					Debug.LogError($"ChunkGenerationQueue: task faulted for {entity.UID} chunk {i}: {task.Exception}");
+					Debug.LogError($"ChunkGenerationQueue: task faulted for {entity.Uid} chunk {i}: {task.Exception}");
 					continue;
 				}
 				ChunkBuilder.MeshDataRaw data = task.Result;
@@ -108,7 +108,7 @@ namespace Universe.Data.Chunk {
 			}
 
 			if(combineList.Count == 0) {
-				Debug.LogWarning($"ChunkGenerationQueue: FinalizeRebuild produced no geometry for {entity.UID}");
+				Debug.LogWarning($"ChunkGenerationQueue: FinalizeRebuild produced no geometry for {entity.Uid}");
 				return;
 			}
 
@@ -116,7 +116,7 @@ namespace Universe.Data.Chunk {
 			Mesh finalMesh = new Mesh();
 			// If combined vertex count will exceed 65535, use 32-bit indices
 			if(totalVertex > 65535) finalMesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-			finalMesh.name = $"EntityMesh_{entity.UID}";
+			finalMesh.name = $"EntityMesh_{entity.Uid}";
 			// Manually concatenate meshes to avoid CombineMeshes issues
 			var finalVerts = new List<Vector3>(totalVertex);
 			var finalNormals = new List<Vector3>(totalVertex);
@@ -200,7 +200,7 @@ namespace Universe.Data.Chunk {
 		}
 
 		public void RequestMeshRebuild(GameEntity.GameEntity entity) {
-			if(!_queue.Contains(entity) && !_ongoing.ContainsKey(entity.UID)) {
+			if(!_queue.Contains(entity) && !_ongoing.ContainsKey(entity.Uid)) {
 				_queue.Enqueue(entity);
 			}
 		}

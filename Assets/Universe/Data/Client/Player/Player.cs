@@ -1,4 +1,6 @@
+using System;
 using Settings;
+using Unity.VisualScripting.Dependencies.Sqlite;
 using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.Client.Graphics;
@@ -6,196 +8,201 @@ using Universe.Data.Inventory;
 using Universe.World;
 
 namespace Universe.Data.Client.Player {
+	[Serializable]
+	public struct PlayerData {
+		[PrimaryKey]
+		public string Uid { get; set; } //Unique identifier for the player
+		public string Name { get; set; }
+		public int FactionID { get; set; }
+		public string InventoryUid { get; set; } // Reference to the player's inventory
+	}
+
 	/**
 	* Controls player state information and handles loading of sectors near the player.
 	*/
-	public class Player : MonoBehaviour {
-		PlayerControlState _controlState;
+	public class PlayerState : MonoBehaviour {
 		int _currentSectorID = -1;
-		int _factionID = -1;
-		string _playerName;
-		int _playerStateID = -1;
+		public PlayerData Data;
 
-		[SerializeField]
-		float moveSpeed = 5f;
-		[SerializeField]
-		float lookSensitivity = 2f;
-		[SerializeField]
-		Camera playerCamera;
+		PlayerInventory _inventory => (PlayerInventory) _gameState.InventoryController.GetInventory(Data.InventoryUid);
 
-		[SerializeField]
-		PlayerInventory _inventory;
+		GameState _gameState;
+		PlayerInputController _inputController;
 
-		[SerializeField]
-		BlockOutline blockOutline;
-
-		void Start() {
-			Cursor.lockState = CursorLockMode.Locked;
-			Cursor.visible = false;
-			playerCamera = GetComponentInChildren<Camera>();
-			_controlState = new PlayerControlState {
-				InventoryActive = false,
-				ControlledEntityID = -1,
-				CurrentAlignedEntityID = -1,
-				LastEnteredBlockIndex = -1,
-			};
-			_inventory = new PlayerInventory();
+		public void Initialize(GameState gameState) {
+			_gameState = gameState;
 		}
 
-		void Update() {
-			UpdateBlockOutline();
-			if(!_controlState.InventoryActive) {
-				//Todo: Proper player input controller
-				HandleMovement();
-				HandleLook();
-				HandleBlockInput();
-				HandleBlockSelectionInput();
-			}
-			HandleInventoryInput();
-			CheckSectorTransition(); //Todo: Move this to somewhere else, maybe a GameManager or similar
-		}
+		public class PlayerInputController {
 
-		void UpdateBlockOutline() {
-			if(blockOutline == null) return;
-			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			GameEntity.GameEntity entity = null;
-			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
-				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
-			}
-			if(entity == null || !entity.Loaded) {
-				blockOutline.Hide();
-				return;
-			}
-			BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
-			if(hit.valid) {
-				Vector3 worldPos = entity.transform.position + (Vector3)hit.blockPosition;
-				blockOutline.Show(worldPos);
-			} else {
-				blockOutline.Hide();
-			}
-		}
+			PlayerState _playerState;
+			readonly float moveSpeed = 5f;
+			readonly float lookSensitivity = 2f;
+			Camera _playerCamera;
+			PlayerControlState _controlState;
+			BlockOutline _blockOutline;
 
-		void CheckSectorTransition() {
-			int sectorSize = ServerSettings.Instance.SectorSize.Value;
-			Vector3 playerPosition = transform.position;
-			int newSectorX = Mathf.FloorToInt(playerPosition.x / sectorSize);
-			int newSectorY = Mathf.FloorToInt(playerPosition.y / sectorSize);
-			int newSectorZ = Mathf.FloorToInt(playerPosition.z / sectorSize);
-			int newSectorID = newSectorX + newSectorY * 1000 + newSectorZ * 1000000;
-			if(newSectorID != _currentSectorID) {
-				// Player has moved to a new sector
-				_currentSectorID = newSectorID;
-				Galaxy.Instance.LoadSector(_currentSectorID, true);
-				Debug.Log("Player moved to sector: " + _currentSectorID);
+			public PlayerInputController(PlayerState playerState) {
+				_playerState = playerState;
 			}
-		}
 
-		void HandleMovement() {
-			float h = Input.GetAxis("Horizontal");
-			float v = Input.GetAxis("Vertical");
-			float up = 0f;
-			if (Input.GetKey(KeyCode.Space)) up += 1f;
-			if (Input.GetKey(KeyCode.LeftControl)) up -= 1f;
-			Vector3 move = playerCamera.transform.right * h + playerCamera.transform.forward * v + playerCamera.transform.up * up;
-			transform.position += move * (moveSpeed * Time.deltaTime);
-		}
+			public void UpdateControlState() {
+				UpdateBlockOutline();
+				if(!_controlState.InventoryActive) {
+					//Todo: Proper player input controller
+					HandleMovement();
+					HandleLook();
+					HandleBlockInput();
+					HandleBlockSelectionInput();
+				}
+				HandleInventoryInput();
+				CheckSectorTransition(); //Todo: Move this to somewhere else, maybe a GameManager or similar
+			}
 
-		void HandleLook() {
-			float mouseX = Input.GetAxis("Mouse X") * lookSensitivity;
-			float mouseY = Input.GetAxis("Mouse Y") * lookSensitivity;
-			_controlState.Pitch -= mouseY;
-			_controlState.Pitch = Mathf.Clamp(_controlState.Pitch, -90f, 90f);
-			playerCamera.transform.localEulerAngles = new Vector3(_controlState.Pitch, 0f, 0f);
-			transform.Rotate(Vector3.up * mouseX);
-		}
+			void CheckSectorTransition() {
+				int sectorSize = ServerConfig.Instance.SectorSize.Value;
+				Vector3 playerPosition = _playerState.transform.position;
+				int newSectorX = Mathf.FloorToInt(playerPosition.x / sectorSize);
+				int newSectorY = Mathf.FloorToInt(playerPosition.y / sectorSize);
+				int newSectorZ = Mathf.FloorToInt(playerPosition.z / sectorSize);
+				int newSectorID = newSectorX + newSectorY * 1000 + newSectorZ * 1000000;
+				if(newSectorID != _playerState._currentSectorID) {
+					//Todo: This should be done on server
+					_playerState._currentSectorID = newSectorID;
+					Galaxy.Instance.LoadSector(_playerState._currentSectorID, true);
+					Debug.Log("Player moved to sector: " + _playerState._currentSectorID);
+				}
+			}
 
-		void HandleBlockInput() {
-			if(Input.GetMouseButtonDown(0)) {
-				RemoveBlock();
-			}
-			if(Input.GetMouseButtonDown(1)) {
-				PlaceBlock();
-			}
-		}
 
-		void HandleBlockSelectionInput() {
-			float scroll = Input.GetAxis("Mouse ScrollWheel");
-			if(scroll > 0f) {
-				_inventory.SelectNext();
-			} else if(scroll < 0f) {
-				_inventory.SelectPrevious();
+			void UpdateBlockOutline() {
+				if(_blockOutline == null) return;
+				Ray ray = _playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+				GameEntity.GameEntity entity = null;
+				if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+					entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+				}
+				if(entity == null || !entity.Loaded) {
+					_blockOutline.Hide();
+					return;
+				}
+				BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
+				if(hit.valid) {
+					Vector3 worldPos = entity.transform.position + (Vector3)hit.blockPosition;
+					_blockOutline.Show(worldPos);
+				} else {
+					_blockOutline.Hide();
+				}
 			}
-		}
 
-		void HandleInventoryInput() {
-			if(Input.GetKeyDown(KeyCode.I)) {
-				_controlState.InventoryActive = !_controlState.InventoryActive;
-				Cursor.lockState = _controlState.InventoryActive ? CursorLockMode.None : CursorLockMode.Locked;
-				Cursor.visible = _controlState.InventoryActive;
-			}
-		}
 
-		public void PlaceBlock() {
-			InventorySlot slot = _inventory.GetSelectedSelectedSlot();
-			if(slot.id == 0 || !slot.GetElementInfo().IsPlacable) {
-				return; // No block selected
+			void HandleMovement() {
+				float h = Input.GetAxis("Horizontal");
+				float v = Input.GetAxis("Vertical");
+				float up = 0f;
+				if(Input.GetKey(KeyCode.Space)) up += 1f;
+				if(Input.GetKey(KeyCode.LeftControl)) up -= 1f;
+				Vector3 move = _playerCamera.transform.right * h + _playerCamera.transform.forward * v + _playerCamera.transform.up * up;
+				_playerState.transform.position += move * (moveSpeed * Time.deltaTime);
 			}
-			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			// Raycast to find entity and block
-			GameEntity.GameEntity entity = null;
-			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
-				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
-			}
-			if(entity == null || !entity.Loaded) return;
-			BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
-			if(hit.valid) {
-				// Place block at adjacent position
-				Vector3Int placePos = hit.blockPosition + Vector3Int.RoundToInt(hit.hitNormal);
-				int chunkSize = IChunkData.ChunkSize;
-				Vector3Int chunkDims = entity.ChunkDimensions;
-				int cx = placePos.x / chunkSize;
-				int cy = placePos.y / chunkSize;
-				int cz = placePos.z / chunkSize;
-				if(cx < 0 || cy < 0 || cz < 0 || cx >= chunkDims.x || cy >= chunkDims.y || cz >= chunkDims.z) return;
-				int chunkIndex = cx + cy * chunkDims.x + cz * chunkDims.x * chunkDims.y;
-				var chunk = entity.GetChunkData(chunkIndex);
-				if(chunk == null) return;
-				int bx = placePos.x - cx * chunkSize;
-				int by = placePos.y - cy * chunkSize;
-				int bz = placePos.z - cz * chunkSize;
-				if(bx < 0 || by < 0 || bz < 0 || bx >= chunkSize || by >= chunkSize || bz >= chunkSize) return;
-				int blockIndex = bx + by * chunkSize + bz * chunkSize * chunkSize;
-				if(chunk.GetBlockType(blockIndex) != 0) return; // Only place if empty
-				// Enqueue modification to be applied/batched by BlockModificationQueue
-				BlockModificationQueue.Instance.EnqueueModification(entity, chunkIndex, blockIndex, slot.id);
-				// Remove from inventory
-				slot.count--;
-				if(slot.count == 0) slot.id = 0;
-				// Update slot in inventory
-				_inventory.slots[_inventory.GetSelectedSelectedSlotIndex()] = slot;
-				// Mesh rebuild will be requested by the modification queue after applying batched changes
-			}
-		}
 
-		public void RemoveBlock() {
-			// Raycast to find entity and block
-			GameEntity.GameEntity entity = null;
-			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
-				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+			void HandleLook() {
+				float mouseX = Input.GetAxis("Mouse X") * lookSensitivity;
+				float mouseY = Input.GetAxis("Mouse Y") * lookSensitivity;
+				_controlState.Pitch -= mouseY;
+				_controlState.Pitch = Mathf.Clamp(_controlState.Pitch, -90f, 90f);
+				_playerCamera.transform.localEulerAngles = new Vector3(_controlState.Pitch, 0f, 0f);
+				_playerState.transform.Rotate(Vector3.up * mouseX);
 			}
-			if(entity == null || !entity.Loaded) return;
-			ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			var hit = BlockRaycast.Raycast(entity, ray, 5f);
-			if(hit.valid) {
-				var chunk = entity.GetChunkData(hit.chunkIndex);
-				if(chunk == null) return;
-				short removedType = chunk.GetBlockType(hit.blockIndex);
-				if(removedType == 0) return;
-				// Enqueue removal modification and add to inventory immediately
-				BlockModificationQueue.Instance.EnqueueModification(entity, hit.chunkIndex, hit.blockIndex, 0);
-				_inventory.AddToAnySlot(removedType, 1);
-				// Mesh rebuild will be requested by the modification queue after applying batched changes
+
+			void HandleBlockInput() {
+				if(Input.GetMouseButtonDown(0)) {
+					RemoveBlock();
+				}
+				if(Input.GetMouseButtonDown(1)) {
+					PlaceBlock();
+				}
+			}
+
+			void HandleBlockSelectionInput() {
+				float scroll = Input.GetAxis("Mouse ScrollWheel");
+				if(scroll > 0f) {
+					_playerState._inventory.SelectNext();
+				} else if(scroll < 0f) {
+					_playerState._inventory.SelectPrevious();
+				}
+			}
+
+			void HandleInventoryInput() {
+				if(Input.GetKeyDown(KeyCode.I)) {
+					_controlState.InventoryActive = !_controlState.InventoryActive;
+					Cursor.lockState = _controlState.InventoryActive ? CursorLockMode.None : CursorLockMode.Locked;
+					Cursor.visible = _controlState.InventoryActive;
+				}
+			}
+
+			public void PlaceBlock() {
+				InventorySlot slot = _playerState._inventory.GetSelectedSelectedSlot();
+				if(slot.ID == 0 || !slot.GetElementInfo().IsPlacable) {
+					return; // No block selected
+				}
+				Ray ray = _playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+				// Raycast to find entity and block
+				GameEntity.GameEntity entity = null;
+				if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+					entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+				}
+				if(entity == null || !entity.Loaded) return;
+				BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
+				if(hit.valid) {
+					// Place block at adjacent position
+					Vector3Int placePos = hit.blockPosition + Vector3Int.RoundToInt(hit.hitNormal);
+					int chunkSize = IChunkData.ChunkSize;
+					Vector3Int chunkDims = entity.ChunkDimensions;
+					int cx = placePos.x / chunkSize;
+					int cy = placePos.y / chunkSize;
+					int cz = placePos.z / chunkSize;
+					if(cx < 0 || cy < 0 || cz < 0 || cx >= chunkDims.x || cy >= chunkDims.y || cz >= chunkDims.z) return;
+					int chunkIndex = cx + cy * chunkDims.x + cz * chunkDims.x * chunkDims.y;
+					var chunk = entity.GetChunkData(chunkIndex);
+					if(chunk == null) return;
+					int bx = placePos.x - cx * chunkSize;
+					int by = placePos.y - cy * chunkSize;
+					int bz = placePos.z - cz * chunkSize;
+					if(bx < 0 || by < 0 || bz < 0 || bx >= chunkSize || by >= chunkSize || bz >= chunkSize) return;
+					int blockIndex = bx + by * chunkSize + bz * chunkSize * chunkSize;
+					if(chunk.GetBlockType(blockIndex) != 0) return; // Only place if empty
+					// Enqueue modification to be applied/batched by BlockModificationQueue
+					BlockModificationQueue.Instance.EnqueueModification(entity, chunkIndex, blockIndex, slot.ID);
+					// Remove from inventory
+					slot.Count--;
+					if(slot.Count == 0) slot.ID = 0;
+					// Update slot in inventory
+					_playerState._inventory.slots[_playerState._inventory.GetSelectedSelectedSlotIndex()] = slot;
+					// Mesh rebuild will be requested by the modification queue after applying batched changes
+				}
+			}
+
+			public void RemoveBlock() {
+				// Raycast to find entity and block
+				GameEntity.GameEntity entity = null;
+				Ray ray = _playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+				if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+					entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+				}
+				if(entity == null || !entity.Loaded) return;
+				ray = _playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+				var hit = BlockRaycast.Raycast(entity, ray, 5f);
+				if(hit.valid) {
+					var chunk = entity.GetChunkData(hit.chunkIndex);
+					if(chunk == null) return;
+					short removedType = chunk.GetBlockType(hit.blockIndex);
+					if(removedType == 0) return;
+					// Enqueue removal modification and add to inventory immediately
+					BlockModificationQueue.Instance.EnqueueModification(entity, hit.chunkIndex, hit.blockIndex, 0);
+					_playerState._inventory.AddToAnySlot(removedType, 1);
+					// Mesh rebuild will be requested by the modification queue after applying batched changes
+				}
 			}
 		}
 

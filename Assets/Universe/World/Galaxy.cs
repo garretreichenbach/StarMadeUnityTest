@@ -10,9 +10,9 @@ namespace Universe.World {
 		public Vector3 systemPosition;
 		public HashSet<int> LoadedSectors;
 
-		int GalaxyRadius => ServerSettings.Instance.GalaxyRadius.Value;
-		int SystemSize => ServerSettings.Instance.SystemSize.Value;
-		int SectorSize => ServerSettings.Instance.SectorSize.Value;
+		int GalaxyRadius => ServerConfig.Instance.GalaxyRadius.Value;
+		int SystemSize => ServerConfig.Instance.SystemSize.Value;
+		int SectorSize => ServerConfig.Instance.SectorSize.Value;
 
 		public Galaxy(long seed, Vector3 systemPosition) {
 			this.seed = seed;

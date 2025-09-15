@@ -36,11 +36,11 @@ namespace Universe.Data.Inventory {
 			for(int i = 0; i < slots.Count; i++) {
 				int slotIndex = (i + _selectedHotbarSlot) % slots.Count;
 				InventorySlot slot = slots[slotIndex];
-				if(slot.id == type) {
-					int spaceInSlot = slot.count;
+				if(slot.ID == type) {
+					int spaceInSlot = slot.Count;
 					if(spaceInSlot > 0) {
 						int toAdd = Mathf.Min(spaceInSlot, count - added);
-						slot.count += toAdd;
+						slot.Count += toAdd;
 						added += toAdd;
 						slots[slotIndex] = slot; // Update the slot in the inventory
 						if(added == count) {
@@ -53,10 +53,10 @@ namespace Universe.Data.Inventory {
 			for(int i = 0; i < slots.Count; i++) {
 				int slotIndex = (i + _selectedHotbarSlot) % slots.Count;
 				InventorySlot slot = slots[slotIndex];
-				if(slot.id == 0) { // Empty slot
+				if(slot.ID == 0) { // Empty slot
 					int toAdd = count - added;
-					slot.id = type;
-					slot.count = toAdd;
+					slot.ID = type;
+					slot.Count = toAdd;
 					added += toAdd;
 					slots[slotIndex] = slot; // Update the slot in the inventory
 					if(added == count) {
@@ -77,12 +77,12 @@ namespace Universe.Data.Inventory {
 			for(int i = 0; i < slots.Count; i++) {
 				int slotIndex = (i + _selectedHotbarSlot) % slots.Count;
 				InventorySlot slot = slots[slotIndex];
-				if(slot.id == type) {
-					int toRemove = Mathf.Min(slot.count, count - removed);
-					slot.count -= toRemove;
+				if(slot.ID == type) {
+					int toRemove = Mathf.Min(slot.Count, count - removed);
+					slot.Count -= toRemove;
 					removed += toRemove;
-					if(slot.count == 0) {
-						slot.id = 0; // Clear the slot if empty
+					if(slot.Count == 0) {
+						slot.ID = 0; // Clear the slot if empty
 					}
 					slots[slotIndex] = slot; // Update the slot in the inventory
 					if(removed == count) {

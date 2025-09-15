@@ -16,13 +16,13 @@ namespace Universe.Data.GameEntity {
 				(target as GameEntity)?.RequestMeshRebuild();
 			}
 			if(GUILayout.Button("Load Chunk Data")) {
-				EntityDatabaseManager.Instance.LoadEntity(((GameEntity)target).UID, true);
+				EntityDatabaseManager.Instance.LoadEntity(((GameEntity)target).Uid, true);
 			}
 			if(GUILayout.Button("Unload Chunk Data")) {
-				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).UID, true);
+				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).Uid, true);
 			}
 			if(GUILayout.Button("Unload From Scene")) {
-				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).UID);
+				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).Uid);
 			}
 		}
 	}
@@ -32,7 +32,7 @@ namespace Universe.Data.GameEntity {
 		public static int IDCounter;
 
 		[Header("Entity Info")]
-		public string UID => Data.UID;
+		public string Uid => Data.Uid;
 
 		public int EntityID => Data.EntityID;
 
@@ -77,7 +77,7 @@ namespace Universe.Data.GameEntity {
 			}
 		}
 
-		string ChunkDataPath => EntityDatabaseManager.Instance.GetChunkDataPath(UID);
+		string ChunkDataPath => EntityDatabaseManager.Instance.GetChunkDataPath(Uid);
 
 		public bool DrawDebugInfo { get; set; } = true;
 
@@ -132,7 +132,7 @@ namespace Universe.Data.GameEntity {
 			bool result = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
 			sw.Stop();
 			if(sw.ElapsedMilliseconds > 5000) {
-				Debug.LogWarning($"[GameEntity] WriteChunkData for entity {UID} took {sw.ElapsedMilliseconds} ms - consider optimizing storage or chunk size.");
+				Debug.LogWarning($"[GameEntity] WriteChunkData for entity {Uid} took {sw.ElapsedMilliseconds} ms - consider optimizing storage or chunk size.");
 			}
 			return result;
 		}
@@ -182,7 +182,7 @@ namespace Universe.Data.GameEntity {
 				AllocateChunks(ChunkDimensions);
 			}
 			if(Data.ChunkCount == 0 || Chunks == null || Chunks.Length == 0) {
-				Debug.LogError($"[GameEntity] RebuildMesh: Entity {UID} is empty!");
+				Debug.LogError($"[GameEntity] RebuildMesh: Entity {Uid} is empty!");
 				return;
 			}
 			var combine = new CombineInstance[Data.ChunkCount];
@@ -241,7 +241,7 @@ namespace Universe.Data.GameEntity {
 		[Serializable]
 		public struct GameEntityData {
 			[PrimaryKey]
-			public string UID { get; set; }
+			public string Uid { get; set; }
 
 			public GameEntityType EntityType { get; set; }
 
