@@ -232,7 +232,7 @@ namespace Element {
 			}
 		}
 
-		private bool DrawCategory(ElementCategory category, int indent, string search) {
+		bool DrawCategory(ElementCategory category, int indent, string search) {
 			if(category == null) return false;
 			bool anyBlockVisible = false;
 			if(!foldoutStates.ContainsKey(category)) foldoutStates[category] = false;
