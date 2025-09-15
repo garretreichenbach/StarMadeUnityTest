@@ -91,20 +91,20 @@ namespace Universe.Data.Chunk {
 					continue;
 				}
 				ChunkBuilder.MeshDataRaw data = task.Result;
-				if(data.vertexCount == 0 || data.triangles == null || data.triangles.Length == 0) continue;
+				if(data.VertexCount == 0 || data.Triangles == null || data.Triangles.Length == 0) continue;
 				Mesh m = new Mesh();
 				// If vertex counts exceed 65535, ensure 32-bit indices are used
-				if(data.vertexCount > 65535) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-				m.SetVertices(new List<Vector3>(data.vertices));
-				m.SetNormals(new List<Vector3>(data.normals));
-				m.SetUVs(0, new List<Vector2>(data.uvs));
-				m.SetTriangles(data.triangles, 0);
+				if(data.VertexCount > 65535) m.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+				m.SetVertices(new List<Vector3>(data.Vertices));
+				m.SetNormals(new List<Vector3>(data.Normals));
+				m.SetUVs(0, new List<Vector2>(data.Uvs));
+				m.SetTriangles(data.Triangles, 0);
 				m.RecalculateBounds();
 				CombineInstance ci = new CombineInstance { mesh = m, transform = Matrix4x4.TRS(entity.GetChunkPosition(i), Quaternion.identity, Vector3.one) };
 				combineList.Add(ci);
-				totalVertex += data.vertexCount;
-				totalTriangles += data.triangleCount;
-				totalBlocks += data.blockCount;
+				totalVertex += data.VertexCount;
+				totalTriangles += data.TriangleCount;
+				totalBlocks += data.BlockCount;
 			}
 
 			if(combineList.Count == 0) {

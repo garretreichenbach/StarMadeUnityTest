@@ -23,14 +23,14 @@ namespace Universe.Data.Chunk {
 
         // Lightweight container used by the async mesher to return raw mesh data
         public struct MeshDataRaw {
-            public Vector3[] vertices;
-            public Vector3[] normals;
-            public Vector2[] uvs;
-            public int[] triangles;
-            public int vertexCount;
-            public int triangleCount;
-            public int blockCount;
-        }
+            public Vector3[] Vertices;
+            public Vector3[] Normals;
+            public Vector2[] Uvs;
+            public int[] Triangles;
+            public int VertexCount;
+            public int TriangleCount;
+            public int BlockCount;
+		}
 
 		// Helper for async mesher: normals and UVs
 		static Vector3 GetFaceNormal(byte dir) {
@@ -59,11 +59,11 @@ namespace Universe.Data.Chunk {
             return Task.Run(() => {
                 if(chunk == null) {
                     Debug.LogError("[ChunkBuilder] BuildChunkAsync called with null chunk!");
-                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                    return new MeshDataRaw { Vertices = Array.Empty<Vector3>(), Normals = Array.Empty<Vector3>(), Uvs = Array.Empty<Vector2>(), Triangles = Array.Empty<int>(), VertexCount = 0, TriangleCount = 0, BlockCount = 0 };
                 }
                 if(chunk is ChunkData cd && !cd.IsValid) {
                     Debug.LogError($"[ChunkBuilder] BuildChunkAsync called with invalid ChunkData (chunkID={cd._chunkID})");
-                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                    return new MeshDataRaw { Vertices = Array.Empty<Vector3>(), Normals = Array.Empty<Vector3>(), Uvs = Array.Empty<Vector2>(), Triangles = Array.Empty<int>(), VertexCount = 0, TriangleCount = 0, BlockCount = 0 };
                 }
 
                 int s = IChunkData.ChunkSize;
@@ -153,7 +153,7 @@ namespace Universe.Data.Chunk {
                 int blockCount = CountBlocksAndGenerateFaces();
                 int totalFaces = facePositions.Count;
                 if(totalFaces == 0) {
-                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                    return new MeshDataRaw { Vertices = Array.Empty<Vector3>(), Normals = Array.Empty<Vector3>(), Uvs = Array.Empty<Vector2>(), Triangles = Array.Empty<int>(), VertexCount = 0, TriangleCount = 0, BlockCount = 0 };
                 }
 
                 int totalVertexCount = totalFaces * 4;
@@ -220,7 +220,7 @@ namespace Universe.Data.Chunk {
                     tris[tStart + 3] = vStart + 0; tris[tStart + 4] = vStart + 3; tris[tStart + 5] = vStart + 2;
                 }
 
-                return new MeshDataRaw { vertices = verts, normals = norms, uvs = uvs, triangles = tris, vertexCount = totalVertexCount, triangleCount = totalIndexCount / 3, blockCount = blockCount };
+                return new MeshDataRaw { Vertices = verts, Normals = norms, Uvs = uvs, Triangles = tris, VertexCount = totalVertexCount, TriangleCount = totalIndexCount / 3, BlockCount = blockCount };
             });
         }
 
