@@ -20,7 +20,7 @@ namespace Element {
 		public static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
 		static bool _loadedTypes;
 		static bool _loadedConfig;
-		static ElementCategory _configRoot;
+		public static ElementCategory _configRoot;
 
 		void Awake() {
 			BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
@@ -205,7 +205,8 @@ namespace Element {
 
 	[CustomEditor(typeof(ElementMap), false)]
 	public class ElementsGUI : Editor {
-		private int selectedElementIndex = 0;
+		Dictionary<ElementCategory, bool> foldoutStates = new Dictionary<ElementCategory, bool>();
+		ElementInfo selectedElement = null;
 
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
@@ -228,29 +229,50 @@ namespace Element {
 			}
 			GUILayout.EndHorizontal();
 
-			// Dropdown for ElementInfo
 			GUILayout.Space(10);
-			GUILayout.Label("Browse Elements", EditorStyles.boldLabel);
-			var allElements = ElementMap.AllElements;
-			if(allElements != null && allElements.Count > 0) {
-				string[] displayNames = allElements.Select(e => e?.IdName ?? "<null>").ToArray();
-				selectedElementIndex = EditorGUILayout.Popup("Element", selectedElementIndex, displayNames);
-				if(selectedElementIndex >= 0 && selectedElementIndex < allElements.Count) {
-					ElementInfo selected = allElements[selectedElementIndex];
-					if(selected != null) {
-						GUILayout.Space(5);
-						GUILayout.Label($"TypeId: {selected.TypeId}");
-						GUILayout.Label($"IdName: {selected.IdName}");
-						GUILayout.Label($"Name: {selected.Name}");
-						GUILayout.Label($"IconId: {selected.IconId}");
-						GUILayout.Label($"TextureIds: {string.Join(", ", selected.TextureIds ?? Array.Empty<short>())}");
-						GUILayout.Label($"Description: {selected.Description}");
-						// Add more fields as needed
+			GUILayout.Label("Browse Elements (by Category)", EditorStyles.boldLabel);
+			if (ElementMap._configRoot != null) {
+				DrawCategory(ElementMap._configRoot, 0);
+			} else {
+				GUILayout.Label("No root category loaded.");
+			}
+
+			if (selectedElement != null) {
+				GUILayout.Space(10);
+				GUILayout.Label($"TypeId: {selectedElement.TypeId}");
+				GUILayout.Label($"IdName: {selectedElement.IdName}");
+				GUILayout.Label($"Name: {selectedElement.Name}");
+				GUILayout.Label($"IconId: {selectedElement.IconId}");
+				GUILayout.Label($"TextureIds: {string.Join(", ", selectedElement.TextureIds ?? Array.Empty<short>())}");
+				GUILayout.Label($"Description: {selectedElement.Description}");
+				// Add more fields as needed
+			}
+		}
+
+		private void DrawCategory(ElementCategory category, int indent) {
+			if (category == null) return;
+			if (!foldoutStates.ContainsKey(category)) foldoutStates[category] = false;
+			EditorGUI.indentLevel = indent;
+			foldoutStates[category] = EditorGUILayout.Foldout(foldoutStates[category], category.Name ?? "<Unnamed Category>", true);
+			if (foldoutStates[category]) {
+				EditorGUI.indentLevel = indent + 1;
+				// Draw blocks
+				if (category.Blocks != null) {
+					foreach (var block in category.Blocks) {
+						if (block == null) continue;
+						if (GUILayout.Button(block.IdName ?? "<null>", EditorStyles.miniButton)) {
+							selectedElement = block;
+						}
 					}
 				}
-			} else {
-				GUILayout.Label("No elements loaded.");
+				// Draw subcategories
+				if (category.ChildCategories != null) {
+					foreach (var subcat in category.ChildCategories) {
+						DrawCategory(subcat, indent + 1);
+					}
+				}
 			}
+			EditorGUI.indentLevel = indent;
 		}
 	}
 
