@@ -207,6 +207,7 @@ namespace Element {
 	public class ElementsGUI : Editor {
 		Dictionary<ElementCategory, bool> foldoutStates = new Dictionary<ElementCategory, bool>();
 		ElementInfo selectedElement = null;
+		string searchString = "";
 
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
@@ -231,8 +232,9 @@ namespace Element {
 
 			GUILayout.Space(10);
 			GUILayout.Label("Browse Elements (by Category)", EditorStyles.boldLabel);
+			searchString = EditorGUILayout.TextField("Search", searchString);
 			if (ElementMap._configRoot != null) {
-				DrawCategory(ElementMap._configRoot, 0);
+				DrawCategory(ElementMap._configRoot, 0, searchString);
 			} else {
 				GUILayout.Label("No root category loaded.");
 			}
@@ -249,9 +251,13 @@ namespace Element {
 			}
 		}
 
-		private void DrawCategory(ElementCategory category, int indent) {
-			if (category == null) return;
+		private bool DrawCategory(ElementCategory category, int indent, string search) {
+			if (category == null) return false;
+			bool anyBlockVisible = false;
 			if (!foldoutStates.ContainsKey(category)) foldoutStates[category] = false;
+			// Check if any block or subcategory matches the search
+			bool hasMatch = CategoryHasMatch(category, search);
+			if (!hasMatch && !string.IsNullOrEmpty(search)) return false;
 			EditorGUI.indentLevel = indent;
 			foldoutStates[category] = EditorGUILayout.Foldout(foldoutStates[category], category.Name ?? "<Unnamed Category>", true);
 			if (foldoutStates[category]) {
@@ -260,6 +266,8 @@ namespace Element {
 				if (category.Blocks != null) {
 					foreach (var block in category.Blocks) {
 						if (block == null) continue;
+						if (!BlockMatchesSearch(block, search)) continue;
+						anyBlockVisible = true;
 						if (GUILayout.Button(block.IdName ?? "<null>", EditorStyles.miniButton)) {
 							selectedElement = block;
 						}
@@ -268,11 +276,29 @@ namespace Element {
 				// Draw subcategories
 				if (category.ChildCategories != null) {
 					foreach (var subcat in category.ChildCategories) {
-						DrawCategory(subcat, indent + 1);
+						if (DrawCategory(subcat, indent + 1, search)) {
+							anyBlockVisible = true;
+						}
 					}
 				}
 			}
 			EditorGUI.indentLevel = indent;
+			return anyBlockVisible || string.IsNullOrEmpty(search);
+		}
+
+		private bool BlockMatchesSearch(ElementInfo block, string search) {
+			if (string.IsNullOrEmpty(search)) return true;
+			search = search.ToLowerInvariant();
+			return (block.IdName != null && block.IdName.ToLowerInvariant().Contains(search))
+				|| (block.Name != null && block.Name.ToLowerInvariant().Contains(search))
+				|| (block.Description != null && block.Description.ToLowerInvariant().Contains(search));
+		}
+
+		private bool CategoryHasMatch(ElementCategory category, string search) {
+			if (string.IsNullOrEmpty(search)) return true;
+			if (category.Blocks != null && category.Blocks.Any(b => BlockMatchesSearch(b, search))) return true;
+			if (category.ChildCategories != null && category.ChildCategories.Any(c => CategoryHasMatch(c, search))) return true;
+			return false;
 		}
 	}
 
