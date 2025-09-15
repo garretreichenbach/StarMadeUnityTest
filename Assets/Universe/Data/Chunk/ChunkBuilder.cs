@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -19,6 +20,209 @@ namespace Universe.Data.Chunk {
 		// Optional resolver to query blocks outside the local chunk bounds.
 		// If set, it will be used to fetch neighbor chunk block types so faces between chunks can be culled.
 		public static Func<IChunkData, int, int, int, short> ExternalBlockResolver;
+
+        // Lightweight container used by the async mesher to return raw mesh data
+        public struct MeshDataRaw {
+            public Vector3[] vertices;
+            public Vector3[] normals;
+            public Vector2[] uvs;
+            public int[] triangles;
+            public int vertexCount;
+            public int triangleCount;
+            public int blockCount;
+        }
+
+		// Helper for async mesher: normals and UVs
+		static Vector3 GetFaceNormal(byte dir) {
+			switch(dir) {
+				case 0: return new Vector3(1,0,0);
+				case 1: return new Vector3(-1,0,0);
+				case 2: return new Vector3(0,1,0);
+				case 3: return new Vector3(0,-1,0);
+				case 4: return new Vector3(0,0,1);
+				default: return new Vector3(0,0,-1);
+			}
+		}
+
+		static Vector2 GetFaceUV(int corner) {
+			switch(corner) {
+				case 0: return new Vector2(0,0);
+				case 1: return new Vector2(1,0);
+				case 2: return new Vector2(1,1);
+				default: return new Vector2(0,1);
+			}
+		}
+
+        // BuildChunkAsync: performs greedy meshing on a background thread and returns raw arrays.
+        // The returned data must be applied to a Unity Mesh on the main thread.
+        public static Task<MeshDataRaw> BuildChunkAsync(IChunkData chunk) {
+            return Task.Run(() => {
+                if(chunk == null) {
+                    Debug.LogError("[ChunkBuilder] BuildChunkAsync called with null chunk!");
+                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                }
+                if(chunk is ChunkData cd && !cd.IsValid) {
+                    Debug.LogError($"[ChunkBuilder] BuildChunkAsync called with invalid ChunkData (chunkID={cd._chunkID})");
+                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                }
+
+                int s = IChunkData.ChunkSize;
+                // Lists for faces
+                var facePositions = new List<float3>();
+                var faceDirs = new List<byte>();
+                var faceSizes = new List<int2>();
+
+                // Reuse existing greedy generator logic but adapted for background thread usage
+                int CountBlocksAndGenerateFaces() {
+                    int totalBlocks = s * s * s;
+                    int blockCount = 0;
+
+                    short[][] mask = new short[s][];
+                    for(int index = 0; index < s; index++) mask[index] = new short[s];
+
+                    short GetTypeClamped(int x, int y, int z) {
+                        if(x < 0 || y < 0 || z < 0 || x >= s || y >= s || z >= s) {
+                            if(ExternalBlockResolver != null) return ExternalBlockResolver(chunk, x, y, z);
+                            return 0;
+                        }
+                        return chunk.GetBlockType(chunk.GetBlockIndex(new Vector3(x, y, z)));
+                    }
+
+                    void GreedySlice(int axis, int sgn) {
+                        int W, H;
+                        for(int i = 0; i < s; i++) {
+                            if(axis == 0) {
+                                W = s;
+                                H = s;
+                                for(int v = 0; v < H; v++) for(int u = 0; u < W; u++) {
+                                    int x = i; int y = v; int z = u;
+                                    short a = GetTypeClamped(x, y, z);
+                                    short b = GetTypeClamped(x + sgn, y, z);
+                                    mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+                                }
+                            } else if(axis == 1) {
+                                W = s; H = s;
+                                for(int v = 0; v < H; v++) for(int u = 0; u < W; u++) {
+                                    int x = u, y = i, z = v;
+                                    short a = GetTypeClamped(x, y, z);
+                                    short b = GetTypeClamped(x, y + sgn, z);
+                                    mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+                                }
+                            } else {
+                                W = s; H = s;
+                                for(int v = 0; v < H; v++) for(int u = 0; u < W; u++) {
+                                    int x = u, y = v, z = i;
+                                    short a = GetTypeClamped(x, y, z);
+                                    short b = GetTypeClamped(x, y, z + sgn);
+                                    mask[u][v] = (short)(a != 0 && (b == 0 || b != a) ? a : 0);
+                                }
+                            }
+
+                            for(int v = 0; v < s; v++) {
+                                for(int u = 0; u < s; u++) {
+                                    short type = mask[u][v];
+                                    if(type == 0) continue;
+                                    int w = 1;
+                                    while(u + w < s && mask[u + w][v] == type) w++;
+                                    int h = 1;
+                                    bool stop = false;
+                                    while(v + h < s && !stop) {
+                                        for(int k = 0; k < w; k++) {
+                                            if(mask[u + k][v + h] != type) { stop = true; break; }
+                                        }
+                                        if(!stop) h++;
+                                    }
+
+                                    for(int dv = 0; dv < h; dv++) for(int du = 0; du < w; du++) mask[u + du][v + dv] = 0;
+
+                                    if(axis == 0) { facePositions.Add(new Unity.Mathematics.float3(i, v, u)); faceDirs.Add((byte)(sgn > 0 ? 0 : 1)); faceSizes.Add(new Unity.Mathematics.int2(w, h)); }
+                                    else if(axis == 1) { facePositions.Add(new Unity.Mathematics.float3(u, i, v)); faceDirs.Add((byte)(sgn > 0 ? 2 : 3)); faceSizes.Add(new Unity.Mathematics.int2(w, h)); }
+                                    else { facePositions.Add(new Unity.Mathematics.float3(u, v, i)); faceDirs.Add((byte)(sgn > 0 ? 4 : 5)); faceSizes.Add(new Unity.Mathematics.int2(w, h)); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Count blocks
+                    for(int i = 0; i < totalBlocks; i++) if(chunk.GetBlockType(i) != 0) blockCount++;
+                    // generate faces
+                    GreedySlice(0, +1); GreedySlice(0, -1); GreedySlice(1, +1); GreedySlice(1, -1); GreedySlice(2, +1); GreedySlice(2, -1);
+                    return blockCount;
+                }
+
+                int blockCount = CountBlocksAndGenerateFaces();
+                int totalFaces = facePositions.Count;
+                if(totalFaces == 0) {
+                    return new MeshDataRaw { vertices = Array.Empty<Vector3>(), normals = Array.Empty<Vector3>(), uvs = Array.Empty<Vector2>(), triangles = Array.Empty<int>(), vertexCount = 0, triangleCount = 0, blockCount = 0 };
+                }
+
+                int totalVertexCount = totalFaces * 4;
+                int totalIndexCount = totalFaces * 6;
+
+                var verts = new Vector3[totalVertexCount];
+                var norms = new Vector3[totalVertexCount];
+                var uvs = new Vector2[totalVertexCount];
+                var tris = new int[totalIndexCount];
+
+                for(int index = 0; index < totalFaces; index++) {
+                    int vStart = index * 4;
+                    int tStart = index * 6;
+                    Unity.Mathematics.float3 o = facePositions[index];
+                    byte dir = faceDirs[index];
+                    Unity.Mathematics.int2 size = faceSizes[index];
+                    int su = size.x; int sv = size.y;
+
+                    Vector3 v0, v1, v2, v3;
+                    switch(dir) {
+                        case 0:
+                            v0 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z - 0.5f);
+                            v1 = new Vector3(o.x + 0.5f, o.y - 0.5f, o.z + su - 0.5f);
+                            v2 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
+                            v3 = new Vector3(o.x + 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
+                            break;
+                        case 1:
+                            v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + su - 0.5f);
+                            v1 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+                            v2 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z - 0.5f);
+                            v3 = new Vector3(o.x - 0.5f, o.y + sv - 0.5f, o.z + su - 0.5f);
+                            break;
+                        case 2:
+                            v0 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z - 0.5f);
+                            v1 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z - 0.5f);
+                            v2 = new Vector3(o.x + su - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
+                            v3 = new Vector3(o.x - 0.5f, o.y + 0.5f, o.z + sv - 0.5f);
+                            break;
+                        case 3:
+                            v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
+                            v1 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z + sv - 0.5f);
+                            v2 = new Vector3(o.x + su - 0.5f, o.y - 0.5f, o.z - 0.5f);
+                            v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+                            break;
+                        case 4:
+                            v0 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z + 0.5f);
+                            v1 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z + 0.5f);
+                            v2 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z + 0.5f);
+                            v3 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z + 0.5f);
+                            break;
+                        default:
+                            v0 = new Vector3(o.x - 0.5f + su, o.y - 0.5f, o.z - 0.5f);
+                            v1 = new Vector3(o.x - 0.5f + su, o.y - 0.5f + sv, o.z - 0.5f);
+                            v2 = new Vector3(o.x - 0.5f, o.y - 0.5f + sv, o.z - 0.5f);
+                            v3 = new Vector3(o.x - 0.5f, o.y - 0.5f, o.z - 0.5f);
+                            break;
+                    }
+
+                    verts[vStart + 0] = v0; verts[vStart + 1] = v1; verts[vStart + 2] = v2; verts[vStart + 3] = v3;
+                    Vector3 n = GetFaceNormal(dir);
+                    norms[vStart + 0] = n; norms[vStart + 1] = n; norms[vStart + 2] = n; norms[vStart + 3] = n;
+                    uvs[vStart + 0] = new Vector2(0, 0); uvs[vStart + 1] = new Vector2(1, 0); uvs[vStart + 2] = new Vector2(1, 1); uvs[vStart + 3] = new Vector2(0, 1);
+                    tris[tStart + 0] = vStart + 0; tris[tStart + 1] = vStart + 2; tris[tStart + 2] = vStart + 1;
+                    tris[tStart + 3] = vStart + 0; tris[tStart + 4] = vStart + 3; tris[tStart + 5] = vStart + 2;
+                }
+
+                return new MeshDataRaw { vertices = verts, normals = norms, uvs = uvs, triangles = tris, vertexCount = totalVertexCount, triangleCount = totalIndexCount / 3, blockCount = blockCount };
+            });
+        }
 
 		public static ChunkBuildResult BuildChunk(IChunkData chunk) {
 			if(chunk == null) {
@@ -324,3 +528,4 @@ namespace Universe.Data.Chunk {
 		}
 	}
 }
+

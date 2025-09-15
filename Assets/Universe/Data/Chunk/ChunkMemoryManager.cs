@@ -115,8 +115,6 @@ namespace Universe.Data.Chunk {
 		public struct ChunkHeader {
 			public long ChunkID;
 			public ChunkState State;
-			public float LastAccessTime;
-			public float LastModifiedTime;
 			public bool IsDirty;
 			public byte CompressionLevel; // 0 = uncompressed, 1-9 = compression levels
 			public int OriginalSize; // Always UNCOMPRESSED_CHUNK_SIZE
@@ -244,8 +242,6 @@ namespace Universe.Data.Chunk {
 			ChunkHeader header = new ChunkHeader {
 				ChunkID = chunkID,
 				State = ChunkState.Uncompressed,
-				LastAccessTime = Time.time,
-				LastModifiedTime = Time.time,
 				IsDirty = false,
 				CompressionLevel = 0,
 				OriginalSize = UncompressedChunkSize,
@@ -319,35 +315,31 @@ namespace Universe.Data.Chunk {
 		#region Block Access Methods
 
 		public int GetRawData(long chunkID, int blockIndex) {
-			/*if(!EnsureChunkAccessible(chunkID).Result) {
-				Debug.LogError($"Cannot access chunk {chunkID} for reading");
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+				throw new KeyNotFoundException($"Chunk {chunkID} not allocated");
+			}
+			if(allocation.State != ChunkState.Uncompressed) {
+				// Caller should ensure chunk is uncompressed. Return 0 (air) as fallback.
 				return 0;
-			}*/
-			ChunkAllocation allocation = _allocations[chunkID];
-			UpdateLastAccessTime(chunkID);
+			}
 			int globalIndex = allocation.PoolIndex * BlocksPerChunk + blockIndex;
 			return _uncompressedPool[globalIndex];
 		}
 
 		public void SetRawData(long chunkID, int blockIndex, int rawData) {
-			/*if(!EnsureChunkAccessible(chunkID).Result) {
-				Debug.LogError($"Cannot access chunk {chunkID} for reading");
-				return;
-			}*/
 			ChunkAllocation allocation = _allocations[chunkID];
-			UpdateLastAccessTime(chunkID);
 			MarkChunkDirty(chunkID);
 			int globalIndex = allocation.PoolIndex * BlocksPerChunk + blockIndex;
 			_uncompressedPool[globalIndex] = rawData;
 		}
 
 		public int[] GetRawDataArray(long chunkID) {
-			/*if(!EnsureChunkAccessible(chunkID).Result) {
-				Debug.LogError($"Cannot access chunk {chunkID} for reading");
-				return null;
-			}*/
-			ChunkAllocation allocation = _allocations[chunkID];
-			UpdateLastAccessTime(chunkID);
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+				throw new KeyNotFoundException($"Chunk {chunkID} not allocated");
+			}
+			if(allocation.State != ChunkState.Uncompressed) {
+				return Array.Empty<int>();
+			}
 			int startIndex = allocation.PoolIndex * BlocksPerChunk;
 			var slice = _uncompressedPool.GetSubArray(startIndex, BlocksPerChunk);
 			return slice.ToArray();
@@ -355,65 +347,23 @@ namespace Universe.Data.Chunk {
 
 		public void SetRawDataArray(long chunkID, int[] data) {
 			if(data.Length != BlocksPerChunk) {
-				Debug.LogError($"Invalid data array size: {data.Length}, expected {BlocksPerChunk}");
-				return;
+				throw new ArgumentException($"Data array length {data.Length} does not match chunk size {BlocksPerChunk}");
 			}
-
-			/*if(!EnsureChunkAccessibleAsync(chunkID).Result) {
-				Debug.LogError($"Cannot access chunk {chunkID} for reading");
-				return;
-			}*/
-
-			ChunkAllocation allocation = _allocations[chunkID];
-			UpdateLastAccessTime(chunkID);
+			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
+				throw new KeyNotFoundException($"Chunk {chunkID} not allocated");
+			}
+			if(allocation.State != ChunkState.Uncompressed) {
+				throw new InvalidOperationException($"Chunk {chunkID} is not uncompressed");
+			}
 			MarkChunkDirty(chunkID);
-
 			int startIndex = allocation.PoolIndex * BlocksPerChunk;
 			var slice = _uncompressedPool.GetSubArray(startIndex, BlocksPerChunk);
-
 			slice.CopyFrom(data);
 		}
 
 		#endregion
 
 		#region Compression Management
-
-		/**
-		* Ensures the specified chunk is accessible for reading/writing. If the chunk is compressed, it will be decompressed asynchronously.
-		*/
-		public async Task<bool> EnsureChunkAccessible(long chunkID) {
-			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
-				Debug.LogError($"Chunk {chunkID} not allocated!");
-				return false;
-			}
-
-			// If already uncompressed, we're good
-			if(allocation.State == ChunkState.Uncompressed) {
-				return true;
-			}
-
-			// If compressed, decompress asynchronously
-			if(allocation.State == ChunkState.Compressed) {
-				/*if (CompressionManager != null) {
-					return await DecompressChunk(chunkID);
-				}*/
-				return false;
-			}
-
-			// If currently being processed, wait for operation
-			if(allocation.State == ChunkState.GPUCompressing || allocation.State == ChunkState.GPUDecompressing) {
-				Debug.LogWarning($"Chunk {chunkID} is being processed, waiting for access (async)");
-				// Wait asynchronously for the operation to complete
-				if(_activeOperations.TryGetValue(chunkID, out CompressionOperation op)) {
-					try {
-						return await op.CompletionSource.Task;
-					} catch {
-						return false;
-					}
-				}
-			}
-			return false;
-		}
 
 		public async Task<bool> CompressChunk(long chunkID) {
 			if(!_allocations.TryGetValue(chunkID, out ChunkAllocation allocation)) {
@@ -521,31 +471,21 @@ namespace Universe.Data.Chunk {
 
 		#region Utility Methods
 
-		void UpdateLastAccessTime(long chunkID) {
-			if(_headers.TryGetValue(chunkID, out ChunkHeader header)) {
-				header.LastAccessTime = Time.time;
-				_headers[chunkID] = header;
-			}
-		}
-
 		void MarkChunkDirty(long chunkID) {
 			if(_headers.TryGetValue(chunkID, out ChunkHeader header)) {
 				header.IsDirty = true;
-				header.LastModifiedTime = Time.time;
 				_headers[chunkID] = header;
 			}
 		}
 
 		bool TryFreeUncompressedSlot() {
-			// Find oldest uncompressed chunk that's not recently accessed
+			//Todo: Unity bitches about time.time in async methods, so we had to refactor this to not use it
 			long oldestChunkID = -1;
-			float oldestTime = float.MaxValue;
 
 			foreach(var kvp in _headers) {
-				ChunkHeader header = kvp.Value;
-				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) && allocation.State == ChunkState.Uncompressed && header.LastAccessTime < oldestTime && Time.time - header.LastAccessTime > 30.0f) { // 30 second threshold
-					oldestTime = header.LastAccessTime;
+				if(_allocations.TryGetValue(kvp.Key, out ChunkAllocation allocation) && allocation.State == ChunkState.Uncompressed) {
 					oldestChunkID = kvp.Key;
+					break; // Just pick the first uncompressed chunk we find
 				}
 			}
 
@@ -879,7 +819,7 @@ namespace Universe.Data.Chunk {
 
 		// Public helpers for tools
 		public long[] GetAllChunkIDs() {
-			var keys = new System.Collections.Generic.List<long>();
+			var keys = new List<long>();
 			foreach(var kvp in _allocations) {
 				keys.Add(kvp.Key);
 			}

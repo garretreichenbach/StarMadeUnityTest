@@ -166,13 +166,14 @@ namespace Universe.Data.Client.Player {
 				if(bx < 0 || by < 0 || bz < 0 || bx >= chunkSize || by >= chunkSize || bz >= chunkSize) return;
 				int blockIndex = bx + by * chunkSize + bz * chunkSize * chunkSize;
 				if(chunk.GetBlockType(blockIndex) != 0) return; // Only place if empty
-				chunk.SetBlockType(blockIndex, slot.id);
+				// Enqueue modification to be applied/batched by BlockModificationQueue
+				BlockModificationQueue.Instance.EnqueueModification(entity, chunkIndex, blockIndex, slot.id);
 				// Remove from inventory
 				slot.count--;
 				if(slot.count == 0) slot.id = 0;
 				// Update slot in inventory
 				_inventory.slots[_inventory.GetSelectedSelectedSlotIndex()] = slot;
-				entity.RequestMeshRebuild();
+				// Mesh rebuild will be requested by the modification queue after applying batched changes
 			}
 		}
 
@@ -191,10 +192,10 @@ namespace Universe.Data.Client.Player {
 				if(chunk == null) return;
 				short removedType = chunk.GetBlockType(hit.blockIndex);
 				if(removedType == 0) return;
-				chunk.SetBlockType(hit.blockIndex, 0);
-				// Add to inventory
+				// Enqueue removal modification and add to inventory immediately
+				BlockModificationQueue.Instance.EnqueueModification(entity, hit.chunkIndex, hit.blockIndex, 0);
 				_inventory.AddToAnySlot(removedType, 1);
-				entity.RequestMeshRebuild();
+				// Mesh rebuild will be requested by the modification queue after applying batched changes
 			}
 		}
 

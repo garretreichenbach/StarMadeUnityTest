@@ -15,6 +15,11 @@ namespace Settings {
 		#region Performance Settings
 
 		[Header("Performance Settings")]
+		[InspectorLabel("Max Block Modifications Per Frame")]
+		[Tooltip("Maximum number of block modifications to process per frame from the BlockModificationQueue.")]
+		public IntSettingsValue MaxBlockModificationsPerFrame = new IntSettingsValue("Max Block Modifications Per Frame",
+			"Maximum number of block modifications to process per frame from the BlockModificationQueue.", 128, 1, 1000, true);
+
 		[InspectorLabel("GPU Readback Timeout")]
 		[Tooltip("Maximum time in seconds to wait for GPU readback to complete before timing out.")]
 		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout",
