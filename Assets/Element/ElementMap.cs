@@ -14,13 +14,13 @@ namespace Element {
 		static string BlockTypesPath;
 		static string BlockConfigPath;
 
-		public static List<ElementInfo> AllElements { get; private set; }
+		public static List<ElementInfo> AllElements = new List<ElementInfo>();
 
 		static readonly Dictionary<short, string> TypeIdByName = new Dictionary<short, string>();
 		public static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
 		static bool _loadedTypes;
 		static bool _loadedConfig;
-		public static ElementCategory _configRoot;
+		public static ElementCategory ConfigRoot;
 
 		void Awake() {
 			BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
@@ -78,11 +78,12 @@ namespace Element {
 			if(!_loadedTypes) {
 				LoadElementTypes();
 			}
+			AllElements.Clear();
 			var root = new XmlDocument();
 			root.LoadXml(data == null ? File.ReadAllText(BlockConfigPath) : Encoding.UTF8.GetString(data));
 			var configNode = root.SelectSingleNode("Config");
 			var elementNode = configNode?.SelectSingleNode("Element");
-			var elements = new List<ElementInfo>();
+			var elements = AllElements;
 			if(configNode != null && elementNode.HasChildNodes) {
 				foreach(XmlNode child in elementNode.ChildNodes) {
 					if(child is XmlElement element) {
@@ -115,6 +116,7 @@ namespace Element {
 			}
 			_loadedConfig = true;
 			AllElements = elements;
+			Debug.Log($"ElementMap.LoadElementConfig: Loaded {AllElements.Count} elements.");
 		}
 
 		static void CollectElementsFromCategory(ElementCategory category, List<ElementInfo> elements) {
@@ -131,6 +133,8 @@ namespace Element {
 		static void ProcessCategoryTree(ElementCategory category) {
 			// Defensive parse of BlockElements into Blocks
 			if(category.BlockElements != null) {
+				if(category.Blocks == null) category.Blocks = new List<ElementInfo>();
+				if(AllElements == null) AllElements = new List<ElementInfo>();
 				var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
 				foreach(XmlElement blockElem in category.BlockElements) {
 					try {
@@ -146,8 +150,9 @@ namespace Element {
 				}
 			}
 			if(category.ChildCategoriesRaw != null) {
+				if(category.ChildCategories == null) category.ChildCategories = new List<ElementCategory>();
 				foreach(XmlElement elem in category.ChildCategoriesRaw) {
-					if(elem.Name == "Block") continue; // Already handled
+					if(elem.Name == "Block") continue; // Already handledz
 					if(string.Equals(elem.Name, "recipes", StringComparison.OrdinalIgnoreCase) || string.Equals(elem.Name, "recipe", StringComparison.OrdinalIgnoreCase)) continue; // Ignore recipes category and its children
 					XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(elem.Name));
 					using XmlNodeReader reader = new XmlNodeReader(elem);
@@ -172,13 +177,14 @@ namespace Element {
 				return;
 			}
 			XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute("Config"));
-			serializer.Serialize(new MemoryStream(data ?? File.ReadAllBytes(BlockConfigPath)), _configRoot);
+			serializer.Serialize(new MemoryStream(data ?? File.ReadAllBytes(BlockConfigPath)), ConfigRoot);
 		}
 
 		/**
 		* Loads the BlockTypes.properties file and populates AllElements and ElementNameLookup.
 		*/
 		public static void LoadElementTypes() {
+			TypeIdByName.Clear();
 			if(!File.Exists(BlockTypesPath)) {
 				throw new FileNotFoundException($"ElementMap.LoadElementTypes: {BlockTypesPath} does not exist.");
 			}
@@ -233,10 +239,8 @@ namespace Element {
 			GUILayout.Space(10);
 			GUILayout.Label("Browse Elements (by Category)", EditorStyles.boldLabel);
 			searchString = EditorGUILayout.TextField("Search", searchString);
-			if (ElementMap._configRoot != null) {
-				DrawCategory(ElementMap._configRoot, 0, searchString);
-			} else {
-				GUILayout.Label("No root category loaded.");
+			if (ElementMap.ConfigRoot != null) {
+				DrawCategory(ElementMap.ConfigRoot, 0, searchString);
 			}
 
 			if (selectedElement != null) {
@@ -286,7 +290,7 @@ namespace Element {
 			return anyBlockVisible || string.IsNullOrEmpty(search);
 		}
 
-		private bool BlockMatchesSearch(ElementInfo block, string search) {
+		bool BlockMatchesSearch(ElementInfo block, string search) {
 			if (string.IsNullOrEmpty(search)) return true;
 			search = search.ToLowerInvariant();
 			return (block.IdName != null && block.IdName.ToLowerInvariant().Contains(search))
@@ -294,7 +298,7 @@ namespace Element {
 				|| (block.Description != null && block.Description.ToLowerInvariant().Contains(search));
 		}
 
-		private bool CategoryHasMatch(ElementCategory category, string search) {
+		bool CategoryHasMatch(ElementCategory category, string search) {
 			if (string.IsNullOrEmpty(search)) return true;
 			if (category.Blocks != null && category.Blocks.Any(b => BlockMatchesSearch(b, search))) return true;
 			if (category.ChildCategories != null && category.ChildCategories.Any(c => CategoryHasMatch(c, search))) return true;
@@ -482,12 +486,19 @@ namespace Element {
 		[XmlIgnore]
 		public string Name { get; set; }
 
-		[XmlAnyElement("Block")]
-		public List<XmlElement> BlockElements { get; set; }
+		[XmlAnyElement]
+		public List<XmlElement> AllRawElements { get; set; } = new List<XmlElement>();
+
 		[XmlIgnore]
 		public List<ElementInfo> Blocks { get; set; } = new List<ElementInfo>();
 
-		[XmlAnyElement] internal List<XmlElement> ChildCategoriesRaw { get; set; }
+		[XmlIgnore]
+		public List<XmlElement> BlockElements =>
+			AllRawElements?.Where(e => e.Name == "Block").ToList() ?? new List<XmlElement>();
+
+		[XmlIgnore]
+		public List<XmlElement> ChildCategoriesRaw =>
+			AllRawElements?.Where(e => e.Name != "Block").ToList() ?? new List<XmlElement>();
 
 		[XmlIgnore]
 		public List<ElementCategory> ChildCategories { get; set; } = new List<ElementCategory>();
