@@ -10,8 +10,8 @@ using UnityEngine;
 
 namespace Element {
 	public class ElementMap : MonoBehaviour {
-		static readonly string BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
-		static readonly string BlockConfigPath = Path.Combine(Application.persistentDataPath, "Config", "BlockConfig.xml");
+		static string BlockTypesPath;
+		static string BlockConfigPath;
 
 		public static ElementInfo[] AllElements { get; private set; }
 
@@ -19,6 +19,11 @@ namespace Element {
 		static bool _loadedTypes;
 		static bool _loadedConfig;
 		static ElementCategory _configRoot;
+
+		void Awake() {
+			BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
+			BlockConfigPath = Path.Combine(Application.persistentDataPath, "Config", "BlockConfig.xml");
+		}
 
 		[MenuItem("Tools/Regenerate Elements Enum")]
 		public static void RegenerateEnum() {
@@ -79,9 +84,10 @@ namespace Element {
 			var root = new XmlDocument();
 			root.LoadXml(data == null ? File.ReadAllText(BlockConfigPath) : Encoding.UTF8.GetString(data));
 			var configNode = root.SelectSingleNode("Config");
+			var elementNode = configNode?.SelectSingleNode("Element");
 			var elements = new List<ElementInfo>();
-			if(configNode != null && configNode.HasChildNodes) {
-				foreach(XmlNode child in configNode.ChildNodes) {
+			if(configNode != null && elementNode.HasChildNodes) {
+				foreach(XmlNode child in elementNode.ChildNodes) {
 					if(child is XmlElement element) {
 						if(element.Name == "Block") {
 							// Deserialize as ElementInfo
@@ -121,6 +127,18 @@ namespace Element {
 		}
 
 		static void ProcessCategoryTree(ElementCategory category) {
+			// Defensive parse of BlockElements into Blocks
+			if (category.BlockElements != null) {
+				var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
+				foreach (var blockElem in category.BlockElements) {
+					try {
+						var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(blockElem));
+						category.Blocks.Add(info);
+					} catch (Exception ex) {
+						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
+					}
+				}
+			}
 			if(category.ChildCategoriesRaw != null) {
 				foreach(XmlElement elem in category.ChildCategoriesRaw) {
 					if(elem.Name == "Block") continue; // Already handled
@@ -178,7 +196,9 @@ namespace Element {
 				var idx = trimmed.IndexOf('=');
 				if(idx <= 0 || idx == trimmed.Length - 1) continue;
 				var idName = trimmed.Substring(0, idx).Trim();
-				if(!short.TryParse(trimmed.Substring(idx + 1).Trim(), out var typeId)) continue;
+				if(!short.TryParse(trimmed.Substring(idx + 1).Trim(), out short typeId)) {
+					throw new Exception($"ElementMap.LoadElementTypes: Failed to parse {BlockTypesPath}: {line}");
+				}
 				if(typeId > maxId) maxId = typeId;
 				tempList.Add((idName, typeId));
 			}
@@ -214,7 +234,7 @@ namespace Element {
 				ElementMap.LoadElementTypes();
 			}
 			if(GUILayout.Button("Save Element Types")) {
-				ElementMap.WriteElementConfig();
+				ElementMap.WriteElementTypes();
 			}
 			GUILayout.EndHorizontal();
 			GUILayout.Label("Element Config", EditorStyles.boldLabel);
@@ -232,157 +252,189 @@ namespace Element {
 	[XmlRoot("Block")]
 	public class ElementInfo {
 		[XmlIgnore]
-		public short TypeId { get; set; }
+		public short? TypeId { get; set; }
 		[XmlAttribute("icon")]
-		public int IconId { get; set; }
+		string IconIdRaw { get; set; }
+		[XmlIgnore]
+		public int? IconId => int.TryParse(IconIdRaw, out var v) ? v : null;
 		[XmlAttribute("name")]
 		public string Name { get; set; }
 
 		[XmlAttribute("textureId")]
-		string TextureIdString {
-			get => string.Join(", ", TextureIds ?? Array.Empty<short>());
-			set => TextureIds = value?.Split(',').Select(s => short.Parse(s.Trim())).ToArray();
-		}
-
+		public string TextureIdString { get; set; }
 		[XmlIgnore]
-		public short[] TextureIds {
-			get => TextureIdString?.Split(',').Select(s => short.Parse(s.Trim())).ToArray() ?? Array.Empty<short>();
-			set => TextureIdString = string.Join(", ", value);
-		}
+		public short[] TextureIds =>
+			string.IsNullOrWhiteSpace(TextureIdString) ? Array.Empty<short>() : TextureIdString.Split(',').Select(s => short.TryParse(s.Trim(), out var v) ? v : (short)0).ToArray();
 
 		[XmlAttribute("type")]
 		public string IdName { get; set; }
 		[XmlElement("Consistence")]
 		public Recipe Consistence { get; set; }
+
 		[XmlElement("ChamberPrerequisites")]
-		public short[] ChamberPrerequisites { get; set; }
+		string ChamberPrerequisitesRaw { get; set; }
+		[XmlIgnore]
+		public short[] ChamberPrerequisites => ParseShortArray(ChamberPrerequisitesRaw);
+
 		[XmlElement("ChamberMutuallyExclusive")]
-		public short[] ChamberMutuallyExclusive { get; set; }
+		string ChamberMutuallyExclusiveRaw { get; set; }
+		[XmlIgnore]
+		public short[] ChamberMutuallyExclusive => ParseShortArray(ChamberMutuallyExclusiveRaw);
+
 		[XmlElement("ChamberChildren")]
-		public short[] ChamberChildren { get; set; }
+		string ChamberChildrenRaw { get; set; }
+		[XmlIgnore]
+		public short[] ChamberChildren => ParseShortArray(ChamberChildrenRaw);
+
 		[XmlElement("LightSourceColor")]
-		public float[] LightSourceColor { get; set; }
+		string LightSourceColorRaw { get; set; }
+		[XmlIgnore]
+		public float[] LightSourceColor => ParseFloatArray(LightSourceColorRaw);
+
 		[XmlElement("ArmorValue")]
-		public float ArmorValue { get; set; }
+		string ArmorValueRaw { get; set; }
+		[XmlIgnore]
+		public float? ArmorValue => float.TryParse(ArmorValueRaw, out var v) ? v : null;
 		[XmlElement("EffectArmor")]
 		public EffectArmor EffectArmor { get; set; }
 		[XmlElement("Price")]
-		public long Price { get; set; }
+		public long? Price { get; set; }
 		[XmlElement("Description")]
 		public string Description { get; set; }
 		[XmlElement("BlockResourceType")]
-		public int BlockResourceType { get; set; }
+		public int? BlockResourceType { get; set; }
 		[XmlElement("ProducedInFactory")]
-		public short ProducedInFactory { get; set; }
+		public short? ProducedInFactory { get; set; }
 		[XmlElement("BasicResourceFactory")]
-		public short BasicResourceFactory { get; set; }
+		public short? BasicResourceFactory { get; set; }
 		[XmlElement("FactoryBakeTime")]
-		public float FactoryBakeTime { get; set; }
+		public float? FactoryBakeTime { get; set; }
 		[XmlElement("InventoryGroup")]
 		public string InventoryGroup { get; set; }
 		[XmlElement("Animated")]
-		public bool Animated { get; set; }
+		public bool? Animated { get; set; }
 		[XmlElement("Transparency")]
-		public bool HasTransparency { get; set; }
+		public bool? HasTransparency { get; set; }
 		[XmlElement("InShop")]
-		public bool InShop { get; set; }
+		public bool? InShop { get; set; }
 		[XmlElement("Orientation")]
-		public bool HasOrientation { get; set; }
+		public bool? HasOrientation { get; set; }
 		[XmlElement("BlockComputerReference")]
-		public short BlockComputerReference { get; set; }
+		public short? BlockComputerReference { get; set; }
 		[XmlElement("Slab")]
-		public byte SlabType { get; set; }
+		public byte? SlabType { get; set; }
 		[XmlElement("SlabIds")]
-		public short[] SlabIds { get; set; }
+		string SlabIdsRaw { get; set; }
+		[XmlIgnore]
+		public short[] SlabIds => ParseShortArray(SlabIdsRaw);
 		[XmlElement("StyleIds")]
-		public short[] StyleIds { get; set; }
+		string StyleIdsRaw { get; set; }
+		[XmlIgnore]
+		public short[] StyleIds => ParseShortArray(StyleIdsRaw);
 		[XmlElement("SourceReference")]
-		public short SourceReference { get; set; }
+		public short? SourceReference { get; set; }
 		[XmlElement("GeneralChamber")]
-		public bool IsGeneralChamber { get; set; }
+		public bool? IsGeneralChamber { get; set; }
 		[XmlElement("ChamberCapacity")]
-		public float ChamberCapacity { get; set; }
+		public float? ChamberCapacity { get; set; }
 		[XmlElement("ChamberRoot")]
-		public short ChamberRoot { get; set; }
+		public short? ChamberRoot { get; set; }
 		[XmlElement("ChamberParent")]
-		public short ChamberParent { get; set; }
+		public short? ChamberParent { get; set; }
 		[XmlElement("ChamberUpgradesTo")]
-		public short ChamberUpgradesTo { get; set; }
+		public short? ChamberUpgradesTo { get; set; }
 		[XmlElement("ChamberPermission")]
-		public short ChamberPermission { get; set; }
+		public short? ChamberPermission { get; set; }
 		[XmlElement("ChamberAppliesTo")]
-		public byte ChamberAppliesTo { get; set; }
+		public byte? ChamberAppliesTo { get; set; }
 		[XmlElement("ReactorHp")]
-		public float ReactorHp { get; set; }
+		public float? ReactorHp { get; set; }
 		[XmlElement("ReactorGeneralIconIndex")]
-		public int ReactorIconIndex { get; set; }
+		public int? ReactorIconIndex { get; set; }
 		[XmlElement("Enterable")]
-		public bool IsEnterable { get; set; }
+		public bool? IsEnterable { get; set; }
 		[XmlElement("Mass")]
-		public float Mass { get; set; }
+		public float? Mass { get; set; }
 		[XmlElement("Volume")]
-		public float Volume { get; set; }
+		public float? Volume { get; set; }
 		[XmlElement("Hitpoints")]
-		public int HP { get; set; }
+		public int? HP { get; set; }
 		[XmlElement("Placable")]
-		public bool IsPlacable { get; set; }
+		public bool? IsPlacable { get; set; }
 		[XmlElement("InRecipe")]
-		public bool IsInRecipe { get; set; }
+		public bool? IsInRecipe { get; set; }
 		[XmlElement("CanActivate")]
-		public bool CanActivate { get; set; }
+		public bool? CanActivate { get; set; }
 		[XmlElement("IndividualSides")]
-		public byte IndividualSides { get; set; }
+		public byte? IndividualSides { get; set; }
 		[XmlElement("SideTexturesPointToOrientation")]
-		public bool SideTexturesPointToOrientation { get; set; }
+		public bool? SideTexturesPointToOrientation { get; set; }
 		[XmlElement("HasActivationTexture")]
-		public bool HasActivationTexture { get; set; }
+		public bool? HasActivationTexture { get; set; }
 		[XmlElement("MainCombinationController")]
-		public bool IsMainCombinationController { get; set; }
+		public bool? IsMainCombinationController { get; set; }
 		[XmlElement("SupportCombinationController")]
-		public bool IsSupportCombinationController { get; set; }
+		public bool? IsSupportCombinationController { get; set; }
 		[XmlElement("EffectCombinationController")]
-		public bool IsEffectCombinationController { get; set; }
+		public bool? IsEffectCombinationController { get; set; }
 		[XmlElement("Beacon")]
-		public bool IsBeacon { get; set; }
+		public bool? IsBeacon { get; set; }
 		[XmlElement("Physical")]
-		public bool IsPhysical { get; set; }
+		public bool? IsPhysical { get; set; }
 		[XmlElement("BlockStyle")]
-		public byte BlockStyle { get; set; }
+		string BlockStyleRaw { get; set; }
+		[XmlIgnore]
+		public byte? BlockStyle => ParseByte(BlockStyleRaw);
 		[XmlElement("LightSource")]
-		public bool IsLightSource { get; set; }
+		public bool? IsLightSource { get; set; }
 		[XmlElement("Door")]
-		public bool IsDoor { get; set; }
+		public bool? IsDoor { get; set; }
 		[XmlElement("SensorInput")]
-		public bool IsSensorInput { get; set; }
+		public bool? IsSensorInput { get; set; }
 		[XmlElement("DrawLogicConnection")]
-		public bool DrawLogicConnection { get; set; }
+		public bool? DrawLogicConnection { get; set; }
 		[XmlElement("Deprecated")]
-		public bool IsDeprecated { get; set; }
+		public bool? IsDeprecated { get; set; }
 		[XmlElement("ExplosionAbsorbtion")]
-		public float ExplosionAbsorbtion { get; set; }
+		public float? ExplosionAbsorbtion { get; set; }
 		[XmlElement("OnlyDrawnInBuildMode")]
-		public bool OnlyDrawnInBuildMode { get; set; }
+		public bool? OnlyDrawnInBuildMode { get; set; }
 		[XmlElement("LodActivationAnimationStyle")]
-		public byte LodActivationAnimationStyle { get; set; }
+		public byte? LodActivationAnimationStyle { get; set; }
 		[XmlElement("SystemBlock")]
-		public bool IsSystemBlock { get; set; }
+		public bool? IsSystemBlock { get; set; }
 		[XmlElement("LogicBlock")]
-		public bool IsLogicBlock { get; set; }
+		public bool? IsLogicBlock { get; set; }
 		[XmlElement("LogicSignaledByRail")]
-		public bool IsLogicSignaledByRail { get; set; }
+		public bool? IsLogicSignaledByRail { get; set; }
 		[XmlElement("LogicBlockButton")]
-		public bool IsLogicBlockButton { get; set; }
+		public bool? IsLogicBlockButton { get; set; }
+
+		static short[] ParseShortArray(string raw) {
+			if (string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<short>();
+			return raw.Split(',').Select(s => short.TryParse(s.Trim(), out var v) ? v : (short)0).ToArray();
+		}
+		static float[] ParseFloatArray(string raw) {
+			if (string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<float>();
+			return raw.Split(',').Select(s => float.TryParse(s.Trim(), out var v) ? v : 0f).ToArray();
+		}
+		static byte? ParseByte(string raw) {
+			if (string.IsNullOrWhiteSpace(raw)) return null;
+			if (byte.TryParse(raw.Trim(), out var v)) return v;
+			return null;
+		}
 	}
 
 	public class ElementCategory {
 		[XmlIgnore]
 		public string Name { get; set; }
 
-		[XmlElement("Block")]
+		[XmlAnyElement("Block")]
+		public List<XmlElement> BlockElements { get; set; }
+		[XmlIgnore]
 		public List<ElementInfo> Blocks { get; set; } = new List<ElementInfo>();
 
-		[XmlAnyElement]
-		public List<XmlElement> ChildCategoriesRaw { get; set; }
+		[XmlAnyElement] internal List<XmlElement> ChildCategoriesRaw { get; set; }
 
 		[XmlIgnore]
 		public List<ElementCategory> ChildCategories { get; set; } = new List<ElementCategory>();
@@ -415,3 +467,4 @@ namespace Element {
 		public float EM { get; set; }
 	}
 }
+
