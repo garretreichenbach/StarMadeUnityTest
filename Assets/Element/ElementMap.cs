@@ -83,39 +83,17 @@ namespace Element {
 			root.LoadXml(data == null ? File.ReadAllText(BlockConfigPath) : Encoding.UTF8.GetString(data));
 			var configNode = root.SelectSingleNode("Config");
 			var elementNode = configNode?.SelectSingleNode("Element");
-			var elements = AllElements;
-			if(configNode != null && elementNode.HasChildNodes) {
-				foreach(XmlNode child in elementNode.ChildNodes) {
-					if(child is XmlElement element) {
-						if(element.Name == "Block") {
-							// Deserialize as ElementInfo
-							var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
-							var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(element));
-							// Assign TypeId from TypeIdByName
-							if(!string.IsNullOrWhiteSpace(info.IdName) && ElementNameLookup.TryGetValue(info.IdName.Trim(), out var tid)) {
-								var typeIdField = typeof(ElementInfo).GetField("TypeId", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-								if(typeIdField != null) typeIdField.SetValue(info, tid);
-							}
-							elements.Add(info);
-						} else {
-							// Deserialize as ElementCategory and process
-							var serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(element.Name));
-							ElementCategory category;
-							try {
-								category = (ElementCategory)serializer.Deserialize(new XmlNodeReader(element));
-								category.Name = element.Name;
-								ProcessCategoryTree(category);
-								// Collect all ElementInfo from this category and its children
-								CollectElementsFromCategory(category, elements);
-							} catch(Exception ex) {
-								Debug.LogWarning($"ElementMap.LoadElementConfig: Failed to deserialize category {element.Name}: {ex}");
-							}
-						}
-					}
-				}
+			if(elementNode != null) {
+				// Deserialize the <Element> node as the root ElementCategory
+				var serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute("Element"));
+				ConfigRoot = (ElementCategory)serializer.Deserialize(new XmlNodeReader(elementNode));
+				ConfigRoot.Name = "Element";
+				ProcessCategoryTree(ConfigRoot);
+				CollectElementsFromCategory(ConfigRoot, AllElements);
+			} else {
+				ConfigRoot = null;
 			}
 			_loadedConfig = true;
-			AllElements = elements;
 			Debug.Log($"ElementMap.LoadElementConfig: Loaded {AllElements.Count} elements.");
 		}
 
@@ -143,6 +121,7 @@ namespace Element {
 						AllElements.Add(info);
 						if(info.IdName != null) {
 							ElementNameLookup[info.IdName.Trim()] = info;
+							info.TypeId = TypeIdByName.FirstOrDefault(kv => string.Equals(kv.Value, info.IdName.Trim(), StringComparison.OrdinalIgnoreCase)).Key;
 						}
 					} catch(Exception ex) {
 						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
@@ -239,48 +218,46 @@ namespace Element {
 			GUILayout.Space(10);
 			GUILayout.Label("Browse Elements (by Category)", EditorStyles.boldLabel);
 			searchString = EditorGUILayout.TextField("Search", searchString);
-			if (ElementMap.ConfigRoot != null) {
+			if(ElementMap.ConfigRoot != null) {
 				DrawCategory(ElementMap.ConfigRoot, 0, searchString);
 			}
 
-			if (selectedElement != null) {
+			if(selectedElement != null) {
 				GUILayout.Space(10);
 				GUILayout.Label($"TypeId: {selectedElement.TypeId}");
 				GUILayout.Label($"IdName: {selectedElement.IdName}");
 				GUILayout.Label($"Name: {selectedElement.Name}");
 				GUILayout.Label($"IconId: {selectedElement.IconId}");
 				GUILayout.Label($"TextureIds: {string.Join(", ", selectedElement.TextureIds ?? Array.Empty<short>())}");
-				GUILayout.Label($"Description: {selectedElement.Description}");
-				// Add more fields as needed
 			}
 		}
 
 		private bool DrawCategory(ElementCategory category, int indent, string search) {
-			if (category == null) return false;
+			if(category == null) return false;
 			bool anyBlockVisible = false;
-			if (!foldoutStates.ContainsKey(category)) foldoutStates[category] = false;
+			if(!foldoutStates.ContainsKey(category)) foldoutStates[category] = false;
 			// Check if any block or subcategory matches the search
 			bool hasMatch = CategoryHasMatch(category, search);
-			if (!hasMatch && !string.IsNullOrEmpty(search)) return false;
+			if(!hasMatch && !string.IsNullOrEmpty(search)) return false;
 			EditorGUI.indentLevel = indent;
 			foldoutStates[category] = EditorGUILayout.Foldout(foldoutStates[category], category.Name ?? "<Unnamed Category>", true);
-			if (foldoutStates[category]) {
+			if(foldoutStates[category]) {
 				EditorGUI.indentLevel = indent + 1;
 				// Draw blocks
-				if (category.Blocks != null) {
-					foreach (var block in category.Blocks) {
-						if (block == null) continue;
-						if (!BlockMatchesSearch(block, search)) continue;
+				if(category.Blocks != null) {
+					foreach(var block in category.Blocks) {
+						if(block == null) continue;
+						if(!BlockMatchesSearch(block, search)) continue;
 						anyBlockVisible = true;
-						if (GUILayout.Button(block.IdName ?? "<null>", EditorStyles.miniButton)) {
+						if(GUILayout.Button(block.IdName ?? "<null>", EditorStyles.miniButton)) {
 							selectedElement = block;
 						}
 					}
 				}
 				// Draw subcategories
-				if (category.ChildCategories != null) {
-					foreach (var subcat in category.ChildCategories) {
-						if (DrawCategory(subcat, indent + 1, search)) {
+				if(category.ChildCategories != null) {
+					foreach(var subcat in category.ChildCategories) {
+						if(DrawCategory(subcat, indent + 1, search)) {
 							anyBlockVisible = true;
 						}
 					}
@@ -291,17 +268,15 @@ namespace Element {
 		}
 
 		bool BlockMatchesSearch(ElementInfo block, string search) {
-			if (string.IsNullOrEmpty(search)) return true;
+			if(string.IsNullOrEmpty(search)) return true;
 			search = search.ToLowerInvariant();
-			return (block.IdName != null && block.IdName.ToLowerInvariant().Contains(search))
-				|| (block.Name != null && block.Name.ToLowerInvariant().Contains(search))
-				|| (block.Description != null && block.Description.ToLowerInvariant().Contains(search));
+			return (block.IdName != null && block.IdName.ToLowerInvariant().Contains(search)) || (block.Name != null && block.Name.ToLowerInvariant().Contains(search)) || (block.Description != null && block.Description.ToLowerInvariant().Contains(search));
 		}
 
 		bool CategoryHasMatch(ElementCategory category, string search) {
-			if (string.IsNullOrEmpty(search)) return true;
-			if (category.Blocks != null && category.Blocks.Any(b => BlockMatchesSearch(b, search))) return true;
-			if (category.ChildCategories != null && category.ChildCategories.Any(c => CategoryHasMatch(c, search))) return true;
+			if(string.IsNullOrEmpty(search)) return true;
+			if(category.Blocks != null && category.Blocks.Any(b => BlockMatchesSearch(b, search))) return true;
+			if(category.ChildCategories != null && category.ChildCategories.Any(c => CategoryHasMatch(c, search))) return true;
 			return false;
 		}
 	}
