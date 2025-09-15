@@ -338,6 +338,7 @@ GameObject:
   m_Component:
   - component: {fileID: 346569657}
   - component: {fileID: 346569656}
+  - component: {fileID: 346569658}
   m_Layer: 0
   m_Name: Player
   m_TagString: Player
@@ -360,6 +361,7 @@ MonoBehaviour:
   moveSpeed: 5
   lookSensitivity: 2
   playerCamera: {fileID: 1794349886}
+  blockOutline: {fileID: 346569658}
 --- !u!4 &346569657
 Transform:
   m_ObjectHideFlags: 0
@@ -376,6 +378,20 @@ Transform:
   - {fileID: 1794349884}
   m_Father: {fileID: 652724833}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &346569658
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 346569655}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 95ff19af413b4404beb9db4ed98aa723, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  outlineColor: {r: 0, g: 0, b: 0, a: 1}
+  lineWidth: 2
 --- !u!1 &444367897
 GameObject:
   m_ObjectHideFlags: 0

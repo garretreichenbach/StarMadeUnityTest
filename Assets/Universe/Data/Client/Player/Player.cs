@@ -1,11 +1,11 @@
 using Settings;
 using UnityEngine;
+using Universe.Data.Chunk;
+using Universe.Data.Client.Graphics;
 using Universe.Data.Inventory;
 using Universe.World;
-using Universe.Data.World;
-using Universe.Data.Chunk;
 
-namespace Universe.Data.Player {
+namespace Universe.Data.Client.Player {
 	/**
 	* Controls player state information and handles loading of sectors near the player.
 	*/
@@ -27,6 +27,9 @@ namespace Universe.Data.Player {
 		[SerializeField]
 		PlayerInventory _inventory;
 
+		[SerializeField]
+		BlockOutline blockOutline;
+
 		void Start() {
 			Cursor.lockState = CursorLockMode.Locked;
 			Cursor.visible = false;
@@ -44,6 +47,7 @@ namespace Universe.Data.Player {
 			if(!_initialized) {
 				return;
 			}
+			UpdateBlockOutline();
 			if(!_controlState.InventoryActive) {
 				//Todo: Proper player input controller
 				HandleMovement();
@@ -53,6 +57,26 @@ namespace Universe.Data.Player {
 			}
 			HandleInventoryInput();
 			CheckSectorTransition(); //Todo: Move this to somewhere else, maybe a GameManager or similar
+		}
+
+		void UpdateBlockOutline() {
+			if(blockOutline == null) return;
+			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+			GameEntity.GameEntity entity = null;
+			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+			}
+			if(entity == null || !entity.Loaded) {
+				blockOutline.Hide();
+				return;
+			}
+			BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
+			if(hit.valid) {
+				Vector3 worldPos = entity.transform.position + (Vector3)hit.blockPosition;
+				blockOutline.Show(worldPos);
+			} else {
+				blockOutline.Hide();
+			}
 		}
 
 		void CheckSectorTransition() {
@@ -124,7 +148,7 @@ namespace Universe.Data.Player {
 				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
 			}
 			if(entity == null || !entity.Loaded) return;
-			var hit = BlockRaycast.Raycast(entity, ray, 5f);
+			BlockRaycastHit hit = BlockRaycast.Raycast(entity, ray, 5f);
 			if(hit.valid) {
 				// Place block at adjacent position
 				Vector3Int placePos = hit.blockPosition + Vector3Int.RoundToInt(hit.hitNormal);

@@ -1,5 +1,4 @@
 using UnityEngine;
-using Universe.Data.Player;
 
 namespace Dev.Testing.Galaxy {
 	public class GalaxySceneTest : MonoBehaviour {
