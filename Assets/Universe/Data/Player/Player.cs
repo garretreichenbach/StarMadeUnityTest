@@ -1,4 +1,3 @@
-using Element;
 using Settings;
 using UnityEngine;
 using Universe.Data.Inventory;
@@ -29,7 +28,7 @@ namespace Universe.Data.Player {
 		void Start() {
 			Cursor.lockState = CursorLockMode.Locked;
 			Cursor.visible = false;
-			_inventory = new Inventory.PlayerInventory();
+			_inventory = new PlayerInventory();
 		}
 
 		void Update() {
