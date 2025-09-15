@@ -4,6 +4,7 @@ using System.IO;
 using System.Xml.Serialization;
 using System.Xml;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -13,9 +14,9 @@ namespace Element {
 		static string BlockTypesPath;
 		static string BlockConfigPath;
 
-		public static ElementInfo[] AllElements { get; private set; }
-
-		static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
+		public static List<ElementInfo> AllElements { get; private set; }
+		static readonly Dictionary<short, string> TypeIdByName = new Dictionary<short, string>();
+		public static readonly Dictionary<string, ElementInfo> ElementNameLookup = new Dictionary<string, ElementInfo>();
 		static bool _loadedTypes;
 		static bool _loadedConfig;
 		static ElementCategory _configRoot;
@@ -28,20 +29,16 @@ namespace Element {
 		[MenuItem("Tools/Regenerate Elements Enum")]
 		public static void RegenerateEnum() {
 			LoadElementTypes();
-			LoadElementConfig();
-			if(AllElements == null || AllElements.Length == 0) {
-				Debug.LogWarning("ElementMap.RegenerateEnum: AllElements is null or empty. Make sure BlockTypes.properties exists and is valid.");
+			if(TypeIdByName == null || TypeIdByName.Count == 0) {
+				Debug.LogWarning("ElementMap.RegenerateEnum: LoadedElements is null or empty. Make sure BlockTypes.properties and BlockConfig.xml exist and are valid.");
 				return;
 			}
-			var sb = new StringBuilder();
+			StringBuilder sb = new StringBuilder();
 			sb.AppendLine("namespace Element {");
 			sb.AppendLine("    public enum Elements {");
 			sb.AppendLine("        NONE = 0,");
-			for(int i = 0; i < AllElements.Length; i++) {
-				var element = AllElements[i];
-				if(element != null) {
-					sb.AppendLine($"        {element.IdName} = {element.TypeId},");
-				}
+			foreach(var element in TypeIdByName) {
+				sb.AppendLine($"        {element.Value.ToUpperInvariant()} = {element.Key},");
 			}
 			sb.AppendLine("    }");
 			sb.AppendLine("}");
@@ -61,11 +58,10 @@ namespace Element {
 		* Writes the BlockTypes.properties file in Java .properties format (IDNAME=short_id).
 		*/
 		public static void WriteElementTypes() {
-			if(AllElements == null || AllElements.Length == 0) return;
+			if(AllElements == null || !AllElements.Any()) return;
 			var sb = new StringBuilder();
 			var seen = new HashSet<string>();
-			for(int i = 0; i < AllElements.Length; i++) {
-				var element = AllElements[i];
+			foreach(ElementInfo element in AllElements) {
 				if(element == null || string.IsNullOrWhiteSpace(element.IdName)) continue;
 				if(seen.Contains(element.IdName)) continue;
 				seen.Add(element.IdName);
@@ -93,6 +89,11 @@ namespace Element {
 							// Deserialize as ElementInfo
 							var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
 							var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(element));
+							// Assign TypeId from TypeIdByName
+							if(!string.IsNullOrWhiteSpace(info.IdName) && ElementNameLookup.TryGetValue(info.IdName.ToLower().Trim(), out var tid)) {
+								var typeIdField = typeof(ElementInfo).GetField("TypeId", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+								if(typeIdField != null) typeIdField.SetValue(info, tid);
+							}
 							elements.Add(info);
 						} else {
 							// Deserialize as ElementCategory and process
@@ -111,8 +112,8 @@ namespace Element {
 					}
 				}
 			}
-			AllElements = elements.ToArray();
 			_loadedConfig = true;
+			AllElements = elements;
 		}
 
 		static void CollectElementsFromCategory(ElementCategory category, List<ElementInfo> elements) {
@@ -128,13 +129,13 @@ namespace Element {
 
 		static void ProcessCategoryTree(ElementCategory category) {
 			// Defensive parse of BlockElements into Blocks
-			if (category.BlockElements != null) {
+			if(category.BlockElements != null) {
 				var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
-				foreach (var blockElem in category.BlockElements) {
+				foreach(var blockElem in category.BlockElements) {
 					try {
 						var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(blockElem));
 						category.Blocks.Add(info);
-					} catch (Exception ex) {
+					} catch(Exception ex) {
 						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
 					}
 				}
@@ -174,51 +175,24 @@ namespace Element {
 		*/
 		public static void LoadElementTypes() {
 			if(!File.Exists(BlockTypesPath)) {
-				Debug.LogWarning($"ElementMap.LoadElementTypes: {BlockTypesPath} does not exist. AllElements will be empty.");
-				AllElements = Array.Empty<ElementInfo>();
-				ElementNameLookup.Clear();
-				_loadedTypes = false;
-				return;
+				throw new FileNotFoundException($"ElementMap.LoadElementTypes: {BlockTypesPath} does not exist.");
 			}
 			var lines = File.ReadAllLines(BlockTypesPath);
 			if(lines.Length == 0) {
-				Debug.LogWarning($"ElementMap.LoadElementTypes: {BlockTypesPath} is empty. AllElements will be empty.");
-				AllElements = Array.Empty<ElementInfo>();
-				ElementNameLookup.Clear();
-				_loadedTypes = false;
-				return;
+				throw new Exception($"ElementMap.LoadElementTypes: {BlockTypesPath} is empty. AllElements will be empty.");
 			}
-			var tempList = new List<(string idName, short typeId)>();
 			short maxId = 0;
-			foreach(var line in lines) {
-				var trimmed = line.Trim();
+			foreach(string line in lines) {
+				string trimmed = line.Trim();
 				if(string.IsNullOrEmpty(trimmed) || trimmed.StartsWith("#") || trimmed.StartsWith(";")) continue;
-				var idx = trimmed.IndexOf('=');
+				int idx = trimmed.IndexOf('=');
 				if(idx <= 0 || idx == trimmed.Length - 1) continue;
-				var idName = trimmed.Substring(0, idx).Trim();
-				if(!short.TryParse(trimmed.Substring(idx + 1).Trim(), out short typeId)) {
-					throw new Exception($"ElementMap.LoadElementTypes: Failed to parse {BlockTypesPath}: {line}");
-				}
+				string idName = trimmed[..idx].Trim();
+				short typeId = (short) int.Parse(trimmed[(idx + 1)..].Trim());
 				if(typeId > maxId) maxId = typeId;
-				tempList.Add((idName, typeId));
-			}
-			if(tempList.Count == 0) {
-				Debug.LogWarning($"ElementMap.LoadElementTypes: No valid entries found in {BlockTypesPath}. AllElements will be empty.");
-				AllElements = Array.Empty<ElementInfo>();
-				ElementNameLookup.Clear();
-				_loadedTypes = false;
-				return;
-			}
-			AllElements = new ElementInfo[maxId + 1];
-			ElementNameLookup.Clear();
-			foreach(var (idName, typeId) in tempList) {
-				var info = new ElementInfo();
-				var typeIdField = typeof(ElementInfo).GetField("TypeId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-				var idNameField = typeof(ElementInfo).GetField("IdName", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
-				if(typeIdField != null) typeIdField.SetValue(info, typeId);
-				if(idNameField != null) idNameField.SetValue(info, idName);
-				AllElements[typeId] = info;
-				ElementNameLookup[idName.ToLower().Trim()] = info;
+				if(!TypeIdByName.ContainsKey(typeId)) {
+					TypeIdByName[typeId] = idName;
+				}
 			}
 			_loadedTypes = true;
 		}
@@ -411,16 +385,16 @@ namespace Element {
 		public bool? IsLogicBlockButton { get; set; }
 
 		static short[] ParseShortArray(string raw) {
-			if (string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<short>();
+			if(string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<short>();
 			return raw.Split(',').Select(s => short.TryParse(s.Trim(), out var v) ? v : (short)0).ToArray();
 		}
 		static float[] ParseFloatArray(string raw) {
-			if (string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<float>();
+			if(string.IsNullOrWhiteSpace(raw) || raw == "{}") return Array.Empty<float>();
 			return raw.Split(',').Select(s => float.TryParse(s.Trim(), out var v) ? v : 0f).ToArray();
 		}
 		static byte? ParseByte(string raw) {
-			if (string.IsNullOrWhiteSpace(raw)) return null;
-			if (byte.TryParse(raw.Trim(), out var v)) return v;
+			if(string.IsNullOrWhiteSpace(raw)) return null;
+			if(byte.TryParse(raw.Trim(), out var v)) return v;
 			return null;
 		}
 	}
@@ -467,4 +441,3 @@ namespace Element {
 		public float EM { get; set; }
 	}
 }
-
