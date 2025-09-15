@@ -18,6 +18,10 @@ namespace Universe.Data.Inventory {
 			return slots[_selectedHotbarSlot];
 		}
 
+		public int GetSelectedSelectedSlotIndex() {
+			return _selectedHotbarSlot;
+		}
+
 		/**
 		* Attempts to add the given amount of the given type to the inventory, starting from the first slot and iterating through all slots until it finds a
 		* matching type, or if none are found will add to an empty slot.

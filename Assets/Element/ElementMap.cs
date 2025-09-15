@@ -129,8 +129,8 @@ namespace Element {
 							ElementNameLookup[info.IdName.Trim()] = info;
 							info.TypeId = TypeIdByName.FirstOrDefault(kv => string.Equals(kv.Value, info.IdName.Trim(), StringComparison.OrdinalIgnoreCase)).Key;
 						}
-					} catch(Exception ex) {
-						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
+					} catch(Exception) {
+						// ignored
 					}
 				}
 			}

@@ -2,6 +2,8 @@ using Settings;
 using UnityEngine;
 using Universe.Data.Inventory;
 using Universe.World;
+using Universe.Data.World;
+using Universe.Data.Chunk;
 
 namespace Universe.Data.Player {
 	/**
@@ -23,11 +25,18 @@ namespace Universe.Data.Player {
 		Camera playerCamera;
 
 		[SerializeField]
-		Inventory.PlayerInventory _inventory;
+		PlayerInventory _inventory;
 
 		void Start() {
 			Cursor.lockState = CursorLockMode.Locked;
 			Cursor.visible = false;
+			playerCamera = GetComponentInChildren<Camera>();
+			_controlState = new PlayerControlState {
+				InventoryActive = false,
+				ControlledEntityID = -1,
+				CurrentAlignedEntityID = -1,
+				LastEnteredBlockIndex = -1,
+			};
 			_inventory = new PlayerInventory();
 		}
 
@@ -44,17 +53,6 @@ namespace Universe.Data.Player {
 			}
 			HandleInventoryInput();
 			CheckSectorTransition(); //Todo: Move this to somewhere else, maybe a GameManager or similar
-		}
-
-		public void Initialize(int playerStateID, string playerName) {
-			_playerStateID = playerStateID;
-			_playerName = playerName;
-			_controlState = new PlayerControlState {
-				ControlledEntityID = -1,
-				CurrentAlignedEntityID = -1,
-				LastEnteredBlockIndex = -1,
-			};
-			_initialized = true;
 		}
 
 		void CheckSectorTransition() {
@@ -119,27 +117,61 @@ namespace Universe.Data.Player {
 			if(slot.id == 0 || !slot.GetElementInfo().IsPlacable) {
 				return; // No block selected
 			}
-			slot.count--;
-			if(slot.count == 0) {
-				slot.id = 0;
-				if(slot.count < 0) {
-					slot.count = 0;
-					Debug.LogWarning("Inventory slot count went below 0!");
-				}
-			}
-
 			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			if(Physics.Raycast(ray, out RaycastHit hit, 5f)) {
-				Vector3 placePos = hit.point + hit.normal * 0.5f;
-				placePos = new Vector3(Mathf.Round(placePos.x), Mathf.Round(placePos.y), Mathf.Round(placePos.z));
-				//Todo: Place block at placePos
+			// Raycast to find entity and block
+			GameEntity.GameEntity entity = null;
+			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+			}
+			if(entity == null || !entity.Loaded) return;
+			var hit = BlockRaycast.Raycast(entity, ray, 5f);
+			if(hit.valid) {
+				// Place block at adjacent position
+				Vector3Int placePos = hit.blockPosition + Vector3Int.RoundToInt(hit.hitNormal);
+				int chunkSize = IChunkData.ChunkSize;
+				Vector3Int chunkDims = entity.ChunkDimensions;
+				int cx = placePos.x / chunkSize;
+				int cy = placePos.y / chunkSize;
+				int cz = placePos.z / chunkSize;
+				if(cx < 0 || cy < 0 || cz < 0 || cx >= chunkDims.x || cy >= chunkDims.y || cz >= chunkDims.z) return;
+				int chunkIndex = cx + cy * chunkDims.x + cz * chunkDims.x * chunkDims.y;
+				var chunk = entity.GetChunkData(chunkIndex);
+				if(chunk == null) return;
+				int bx = placePos.x - cx * chunkSize;
+				int by = placePos.y - cy * chunkSize;
+				int bz = placePos.z - cz * chunkSize;
+				if(bx < 0 || by < 0 || bz < 0 || bx >= chunkSize || by >= chunkSize || bz >= chunkSize) return;
+				int blockIndex = bx + by * chunkSize + bz * chunkSize * chunkSize;
+				if(chunk.GetBlockType(blockIndex) != 0) return; // Only place if empty
+				chunk.SetBlockType(blockIndex, slot.id);
+				// Remove from inventory
+				slot.count--;
+				if(slot.count == 0) slot.id = 0;
+				// Update slot in inventory
+				_inventory.slots[_inventory.GetSelectedSelectedSlotIndex()] = slot;
+				entity.RequestMeshRebuild();
 			}
 		}
 
 		public void RemoveBlock() {
+			// Raycast to find entity and block
+			GameEntity.GameEntity entity = null;
 			Ray ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
-			if(Physics.Raycast(ray, out RaycastHit hit, 5f)) {
-				//Todo: Remove block
+			if(Physics.Raycast(ray, out RaycastHit entityHit, 5f)) {
+				entity = entityHit.collider.GetComponent<GameEntity.GameEntity>();
+			}
+			if(entity == null || !entity.Loaded) return;
+			ray = playerCamera.ScreenPointToRay(new Vector3(Screen.width / 2, Screen.height / 2));
+			var hit = BlockRaycast.Raycast(entity, ray, 5f);
+			if(hit.valid) {
+				var chunk = entity.GetChunkData(hit.chunkIndex);
+				if(chunk == null) return;
+				short removedType = chunk.GetBlockType(hit.blockIndex);
+				if(removedType == 0) return;
+				chunk.SetBlockType(hit.blockIndex, 0);
+				// Add to inventory
+				_inventory.AddToAnySlot(removedType, 1);
+				entity.RequestMeshRebuild();
 			}
 		}
 

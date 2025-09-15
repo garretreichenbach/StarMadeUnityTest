@@ -9,10 +9,6 @@ namespace Dev.Testing.Galaxy {
 		void Start() {
 			Universe.World.Galaxy.Instance = gameObject.AddComponent<Universe.World.Galaxy>();
 			Debug.Log("Galaxy initialized with seed: " + seed + " at position: " + systemPosition);
-
-			Player player = gameObject.AddComponent<Player>();
-			player.Initialize(1, "TestPlayer");
-			Debug.Log("PlayerController initialized for player: TestPlayer");
 		}
 	}
 }
