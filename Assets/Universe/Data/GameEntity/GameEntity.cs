@@ -92,6 +92,7 @@ namespace Universe.Data.GameEntity {
 		bool _initialized;
 		MeshFilter _meshFilter;
 		MeshRenderer _meshRenderer;
+		MeshCollider _meshCollider;
 
 		void OnGUI() {
 			if(!DrawDebugInfo) return;
@@ -156,10 +157,15 @@ namespace Universe.Data.GameEntity {
 			if(_meshRenderer == null) {
 				_meshRenderer = gameObject.AddComponent<MeshRenderer>();
 			}
+			_meshCollider = gameObject.GetComponent<MeshCollider>();
+			if(_meshCollider == null) {
+				_meshCollider = gameObject.AddComponent<MeshCollider>();
+			}
 			_initialized = true;
 		}
 
 		public void RebuildMesh() {
+			//TODO: THIS CAUSES A FREEZE ON THE MAIN THREAD WHEN CALLED!!! FIX THIS!!!
 			if(!_initialized) {
 				Initialize();
 			}
@@ -169,6 +175,7 @@ namespace Universe.Data.GameEntity {
 			if(!Loaded) {
 				_meshFilter.mesh.Clear();
 				_meshFilter.mesh.RecalculateBounds();
+				_meshCollider.sharedMesh = null;
 				return;
 			}
 			if(Chunks == null || Chunks.Length == 0) {
@@ -201,7 +208,9 @@ namespace Universe.Data.GameEntity {
 			_meshRenderer.material = Resources.Load<Material>("ChunkMaterial");
 			Mesh mesh = new Mesh();
 			mesh.CombineMeshes(combine, true);
+			_meshFilter.mesh.RecalculateBounds();
 			_meshFilter.mesh = mesh;
+			_meshCollider.sharedMesh = mesh;
 		}
 
 		public void RequestMeshRebuild() {

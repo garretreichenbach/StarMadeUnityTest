@@ -3,7 +3,7 @@ using Element;
 
 namespace Universe.Data.Inventory {
 	public class Inventory {
-		public List<InventorySlot> slots = new List<InventorySlot>();
+		public List<InventorySlot> slots = new List<InventorySlot>(10);
 	}
 
 	public struct InventorySlot {

@@ -19,7 +19,7 @@ namespace Universe.Data.Client.Graphics {
 		static readonly int Cull = Shader.PropertyToID("_Cull");
 		static readonly int ZWrite = Shader.PropertyToID("_ZWrite");
 		public Color outlineColor = Color.black;
-		public float lineWidth = 2f;
+		public float lineWidth = 6f; // Not used: Unity GL.LINES does not support line width in 3D Todo: Custom shader
 		Vector3 _blockWorldPos;
 		bool _visible;
 		void OnRenderObject() {
@@ -39,7 +39,7 @@ namespace Universe.Data.Client.Graphics {
 		}
 
 		public void Show(Vector3 worldPos) {
-			_blockWorldPos = worldPos;
+			_blockWorldPos = worldPos - Vector3.one * 0.5f;
 			_visible = true;
 		}
 		public void Hide() {

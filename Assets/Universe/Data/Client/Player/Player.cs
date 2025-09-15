@@ -13,7 +13,6 @@ namespace Universe.Data.Client.Player {
 		PlayerControlState _controlState;
 		int _currentSectorID = -1;
 		int _factionID = -1;
-		bool _initialized;
 		string _playerName;
 		int _playerStateID = -1;
 
@@ -44,9 +43,6 @@ namespace Universe.Data.Client.Player {
 		}
 
 		void Update() {
-			if(!_initialized) {
-				return;
-			}
 			UpdateBlockOutline();
 			if(!_controlState.InventoryActive) {
 				//Todo: Proper player input controller
@@ -97,7 +93,10 @@ namespace Universe.Data.Client.Player {
 		void HandleMovement() {
 			float h = Input.GetAxis("Horizontal");
 			float v = Input.GetAxis("Vertical");
-			Vector3 move = transform.right * h + transform.forward * v;
+			float up = 0f;
+			if (Input.GetKey(KeyCode.Space)) up += 1f;
+			if (Input.GetKey(KeyCode.LeftControl)) up -= 1f;
+			Vector3 move = playerCamera.transform.right * h + playerCamera.transform.forward * v + playerCamera.transform.up * up;
 			transform.position += move * (moveSpeed * Time.deltaTime);
 		}
 
