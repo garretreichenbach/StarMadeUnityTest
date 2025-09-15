@@ -76,31 +76,65 @@ namespace Element {
 			if(!_loadedTypes) {
 				LoadElementTypes();
 			}
-			XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute("Config"));
-			//Only get the elements under Config > Element
 			var root = new XmlDocument();
 			root.LoadXml(data == null ? File.ReadAllText(BlockConfigPath) : Encoding.UTF8.GetString(data));
-			if(root.SelectSingleNode("Config/Element") is XmlElement elementNode) _configRoot = (ElementCategory) serializer.Deserialize(new XmlNodeReader(elementNode));
-			ProcessCategoryTree(_configRoot);
+			var configNode = root.SelectSingleNode("Config");
+			var elements = new List<ElementInfo>();
+			if(configNode != null && configNode.HasChildNodes) {
+				foreach(XmlNode child in configNode.ChildNodes) {
+					if(child is XmlElement element) {
+						if(element.Name == "Block") {
+							// Deserialize as ElementInfo
+							var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
+							var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(element));
+							elements.Add(info);
+						} else {
+							// Deserialize as ElementCategory and process
+							var serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(element.Name));
+							ElementCategory category;
+							try {
+								category = (ElementCategory)serializer.Deserialize(new XmlNodeReader(element));
+								category.Name = element.Name;
+								ProcessCategoryTree(category);
+								// Collect all ElementInfo from this category and its children
+								CollectElementsFromCategory(category, elements);
+							} catch(Exception ex) {
+								Debug.LogWarning($"ElementMap.LoadElementConfig: Failed to deserialize category {element.Name}: {ex}");
+							}
+						}
+					}
+				}
+			}
+			AllElements = elements.ToArray();
 			_loadedConfig = true;
+		}
+
+		static void CollectElementsFromCategory(ElementCategory category, List<ElementInfo> elements) {
+			if(category.Blocks != null) {
+				elements.AddRange(category.Blocks);
+			}
+			if(category.ChildCategories != null) {
+				foreach(var child in category.ChildCategories) {
+					CollectElementsFromCategory(child, elements);
+				}
+			}
 		}
 
 		static void ProcessCategoryTree(ElementCategory category) {
 			if(category.ChildCategoriesRaw != null) {
 				foreach(XmlElement elem in category.ChildCategoriesRaw) {
 					if(elem.Name == "Block") continue; // Already handled
-					if(string.Equals(elem.Name, "recipes", StringComparison.OrdinalIgnoreCase)) continue; // Ignore recipes category and its children
-					var serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(elem.Name));
-					using(var reader = new XmlNodeReader(elem)) {
-						try {
-							var child = (ElementCategory)serializer.Deserialize(reader);
-							child.Name = elem.Name;
-							ProcessCategoryTree(child);
-							category.ChildCategories.Add(child);
-						} catch(Exception exception) {
-							Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to deserialize {elem.Name} category: {exception}");
-							//BlockConfig.xml has a bunch of old recipe stuff in it at the end, we can just ignore it
-						}
+					if(string.Equals(elem.Name, "recipes", StringComparison.OrdinalIgnoreCase) || string.Equals(elem.Name, "recipe", StringComparison.OrdinalIgnoreCase)) continue; // Ignore recipes category and its children
+					XmlSerializer serializer = new XmlSerializer(typeof(ElementCategory), new XmlRootAttribute(elem.Name));
+					using XmlNodeReader reader = new XmlNodeReader(elem);
+					try {
+						ElementCategory child = (ElementCategory)serializer.Deserialize(reader);
+						child.Name = elem.Name;
+						ProcessCategoryTree(child);
+						category.ChildCategories.Add(child);
+					} catch(Exception exception) {
+						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to deserialize category {elem.Name}: {exception}");
+						//BlockConfig.xml has a bunch of old recipe stuff in it at the end,we can just ignore it
 					}
 				}
 			}
