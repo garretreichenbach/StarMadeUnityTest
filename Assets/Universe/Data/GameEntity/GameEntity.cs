@@ -231,13 +231,9 @@ namespace Universe.Data.GameEntity {
 				// Generate a unique chunkID for each chunk (entityID shifted left, plus index)
 				long chunkID = ((long)EntityID << 32) | (uint)i;
 				// Only allocate if not already present in memory manager
-				if (!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
+				if(!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
 					ChunkMemoryManager.Instance.AllocateChunk(chunkID, EntityID, i);
 					Chunks[i] = new ChunkData(chunkID, ChunkMemoryManager.Instance._allocations[chunkID].PoolIndex);
-					// Optionally fill with default data if needed (for new entities only)
-					// int[] data = new int[32 * 32 * 32];
-					// for(int j = 0; j < data.Length; j++) data[j] = 1;
-					// ChunkMemoryManager.Instance.SetRawDataArray(chunkID, data);
 				}
 			}
 		}
@@ -269,7 +265,7 @@ namespace Universe.Data.GameEntity {
 
 			[Ignore]
 			public int[] ChunkDimensions {
-				get => new int[] { ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ };
+				get => new[] { ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ };
 				set => (ChunkDimensionsX, ChunkDimensionsY, ChunkDimensionsZ) = (value[0], value[1], value[2]);
 			}
 		}
