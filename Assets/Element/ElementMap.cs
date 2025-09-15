@@ -51,7 +51,7 @@ namespace Element {
 		}
 
 		public static ElementInfo GetInfo(string name) {
-			return ElementNameLookup[name.ToLower().Trim()];
+			return ElementNameLookup[name.Trim()];
 		}
 
 		/**
@@ -90,7 +90,7 @@ namespace Element {
 							var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
 							var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(element));
 							// Assign TypeId from TypeIdByName
-							if(!string.IsNullOrWhiteSpace(info.IdName) && ElementNameLookup.TryGetValue(info.IdName.ToLower().Trim(), out var tid)) {
+							if(!string.IsNullOrWhiteSpace(info.IdName) && ElementNameLookup.TryGetValue(info.IdName.Trim(), out var tid)) {
 								var typeIdField = typeof(ElementInfo).GetField("TypeId", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 								if(typeIdField != null) typeIdField.SetValue(info, tid);
 							}
@@ -131,12 +131,16 @@ namespace Element {
 			// Defensive parse of BlockElements into Blocks
 			if(category.BlockElements != null) {
 				var serializer = new XmlSerializer(typeof(ElementInfo), new XmlRootAttribute("Block"));
-				foreach(var blockElem in category.BlockElements) {
+				foreach(XmlElement blockElem in category.BlockElements) {
 					try {
-						var info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(blockElem));
+						ElementInfo info = (ElementInfo)serializer.Deserialize(new XmlNodeReader(blockElem));
 						category.Blocks.Add(info);
+						AllElements.Add(info);
+						if(info.IdName != null) {
+							ElementNameLookup[info.IdName.Trim()] = info;
+						}
 					} catch(Exception ex) {
-						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.OuterXml}\n{ex}");
+						Debug.LogWarning($"ElementMap.ProcessCategoryTree: Failed to parse Block: {blockElem.InnerXml}\n{ex}");
 					}
 				}
 			}
