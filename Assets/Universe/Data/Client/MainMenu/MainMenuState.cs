@@ -3,15 +3,17 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using UnityEngine;
+using UnityEngine.UI;
 using Universe.Data.Common;
 using Universe.Data.Common.Resource;
 using Universe.Data.Inventory;
 using Debug = UnityEngine.Debug;
+using Random = UnityEngine.Random;
 
 namespace Universe.Data.Client.MainMenu {
 	public class MainMenuState : GameState {
 
-		public enum MainMenuLoadState {
+		enum MainMenuLoadState {
 			None,
 			LoadingAssets,
 			PlayingIntroVideo,
@@ -19,8 +21,17 @@ namespace Universe.Data.Client.MainMenu {
 			LoadingGame,
 		}
 
+		readonly float _bgFadeDuration = 2000f;
+		readonly float _changeBgTimer = 10000f;
+		float _bgFadeTimer;
+		bool _bgFadingOut;
+		Image _bgUI; // Placeholder for actual UI component
+		Texture2D _currentBg;
+
 		MainMenuLoadState _currentLoadState = MainMenuLoadState.None;
 		MainMenuLoader _loader;
+		float _updateTimer;
+		AudioSource _musicSource;
 
 		public override InventoryController InventoryController {
 			get => throw new NotImplementedException("MainMenuState does not have an InventoryController");
@@ -35,6 +46,19 @@ namespace Universe.Data.Client.MainMenu {
 				State = this,
 			};
 			_loader.SetUp();
+			_bgUI = GameObject.Find("BackgroundImage").GetComponent<Image>();
+			_currentBg = GetRandomBackground();
+			_musicSource = gameObject.AddComponent<AudioSource>();
+			_musicSource.loop = true;
+			_musicSource.volume = 0.5f;
+			_musicSource.playOnAwake = false;
+			AudioClip mainTheme = (AudioClip)ResourceManager.GetResourceAtPath("Audio/Music/Main Theme");
+			if(mainTheme != null) {
+				_musicSource.clip = mainTheme;
+				_musicSource.Play();
+			} else {
+				throw new Exception("Main Theme audio clip not found!");
+			}
 		}
 
 		void Update() {
@@ -64,6 +88,7 @@ namespace Universe.Data.Client.MainMenu {
 
 				case MainMenuLoadState.Active:
 					//Wait for user input to start game or exit
+					UpdateActive();
 					break;
 
 				case MainMenuLoadState.LoadingGame:
@@ -73,6 +98,41 @@ namespace Universe.Data.Client.MainMenu {
 				default:
 					throw new ArgumentOutOfRangeException();
 			}
+		}
+
+		void UpdateActive() {
+			//Handle background image fading and changing
+			_updateTimer += Time.deltaTime * 1000f;
+			if(!(_updateTimer >= 100f)) return;
+			_updateTimer = 0f;
+			if(_bgFadingOut) {
+				_bgFadeTimer += 100f;
+				if(!(_bgFadeTimer >= _bgFadeDuration)) return;
+				_bgFadeTimer = _bgFadeDuration;
+				_bgFadingOut = false;
+				_currentBg = GetRandomBackground();
+			} else {
+				_bgFadeTimer -= 100f;
+				if(!(_bgFadeTimer <= 0f)) return;
+				_bgFadeTimer = 0f;
+				_bgFadingOut = true;
+				//Change alpha
+				if(_currentBg == null) return;
+				float alpha = 1f - _bgFadeTimer / _bgFadeDuration;
+				if(_bgUI != null) {
+					_bgUI.color = new Color(1f, 1f, 1f, alpha);
+				}
+			}
+		}
+
+		Texture2D GetRandomBackground() {
+			object[] backgrounds = ResourceManager.GetResourcesOfType<Texture2D>("Image/Loading Screens");
+			if(backgrounds.Length == 0) {
+				Debug.LogWarning("No loading screen backgrounds found!");
+				return null;
+			}
+			int index = Random.Range(0, backgrounds.Length);
+			return (Texture2D)backgrounds[index];
 		}
 
 		public override void Shutdown(bool restart = false) {
@@ -104,26 +164,24 @@ namespace Universe.Data.Client.MainMenu {
 		public void SetUp() {
 			LoadProgress = 0f;
 			var resourcesToLoad = new Dictionary<string, Type> {
-				{"Image/StarMade Logo.png", typeof(Texture2D)},
-				{"Image/Schine Logo.png", typeof(Texture2D)},
-				{"Image/UI/*.png", typeof(Texture2D[])},
-				{"Image/Loading Screens/*.png", typeof(Texture2D[])},
-				{"Audio/Music/Main Theme.ogg", typeof(AudioClip)},
-				{"Font/*.ttf", typeof(Font[])},
+				{ "Image/StarMade Logo.png", typeof(Texture2D) },
+				{ "Image/Schine Logo.png", typeof(Texture2D) },
+				{ "Image/UI/*.png", typeof(Texture2D[]) },
+				{ "Image/Loading Screens/*.png", typeof(Texture2D[]) },
+				{ "Audio/Music/Main Theme.ogg", typeof(AudioClip) },
+				{ "Font/*.ttf", typeof(Font[]) },
 			};
 			CreateResourcesList(resourcesToLoad);
 			OnStart();
 		}
 
 		void CreateResourcesList(Dictionary<string, Type> resourcesToLoad) {
-			string resourcesPath = Path.Join(Application.dataPath, "Resources");
+			string resourcesPath = Application.dataPath;
 			if(!Directory.Exists(resourcesPath)) {
 				throw new DirectoryNotFoundException($"Resources directory not found at path: {resourcesPath}");
 			}
-			foreach(var kvp in resourcesToLoad) {
-				string path = kvp.Key;
-				Type type = kvp.Value;
-				string fullPath = Path.Join(resourcesPath, path.Replace("Resources/", ""));
+			foreach((string path, Type type) in resourcesToLoad) {
+				string fullPath = Path.Join(resourcesPath, path);
 				if(type == typeof(Texture2D)) {
 					if(path.Contains("*")) {
 						string dirPath = Path.GetDirectoryName(fullPath);
@@ -152,7 +210,7 @@ namespace Universe.Data.Client.MainMenu {
 						Debug.LogWarning($"Directory not found: {dirPath}");
 					}
 				} else if(type == typeof(AudioClip)) {
-					string relativePath = path.Replace("Resources/", "").Replace(".ogg", "");
+					string relativePath = path.Replace(".ogg", "");
 					ToLoadResources.Enqueue(new LoadableResource { Type = type, Path = relativePath });
 				} else if(type == typeof(AudioClip[])) {
 					string dirPath = Path.GetDirectoryName(fullPath);
@@ -204,6 +262,7 @@ namespace Universe.Data.Client.MainMenu {
 		}
 
 		public void OnFinish() {
+			State.ResourceManager.AddLoadedResources(LoadedResources);
 			LoadTimer.Stop();
 			Debug.Log($"MainMenuLoader finished loading in {LoadTimer.ElapsedMilliseconds} ms");
 		}
