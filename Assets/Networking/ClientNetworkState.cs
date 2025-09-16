@@ -12,7 +12,10 @@ namespace Networking {
 		}
 
 		public override void RequestInventory(string inventoryUid, Action<object> action) {
-			throw new NotImplementedException();
+
+		}
+
+		public override void Shutdown() {
 		}
 	}
 }

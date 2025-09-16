@@ -1,19 +1,22 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Universe.Data.Common;
+using Debug = UnityEngine.Debug;
 using EngineSettings = Settings.EngineSettings;
 
 namespace Universe.Data.Chunk {
 
 	/**
-	* Manages GPU-based compression and decompression of chunk data using compute shaders.
-	* Uses AsyncGPUReadback for efficient data transfer between CPU and GPU.
+	 * Manages GPU-based compression and decompression of chunk data using compute shaders.
+	 * Uses AsyncGPUReadback for efficient data transfer between CPU and GPU.
 	 * Todo: Implement processing for multiple chunks per batch so we can better utilize the GPU.
-	*/
-	public class ChunkCompressionManager : MonoBehaviour {
+	 */
+	public class ChunkCompressionManager {
 
 		static readonly int CompressedInput = Shader.PropertyToID("CompressedInput");
 		static readonly int ChunkOutput = Shader.PropertyToID("ChunkOutput");
@@ -21,9 +24,32 @@ namespace Universe.Data.Chunk {
 		static readonly int ChunkInput = Shader.PropertyToID("ChunkInput");
 		static readonly int ChunkCompressedOutput = Shader.PropertyToID("ChunkCompressedOutput");
 
+		readonly GameState _gameState;
+		readonly Queue<int> _availableBuffers;
+
+		readonly BufferSet[] _bufferPool;
+		readonly object _bufferPoolLock = new object();
+
+		public ChunkCompressionManager(GameState gameState) {
+			_gameState = gameState;
+			int bufferPoolSize = EngineSettings.Instance.GPUCompressionBufferPoolSize.Value;
+			_bufferPool = new BufferSet[bufferPoolSize];
+			_availableBuffers = new Queue<int>(bufferPoolSize);
+
+			for(int i = 0; i < bufferPoolSize; i++) {
+				_bufferPool[i] = new BufferSet {
+					Input = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
+					CompressionOutput = new ComputeBuffer(32 * 32 * 32 * 2, sizeof(int)),
+					DecompressionOutput = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
+					Metadata = new ComputeBuffer(4, sizeof(uint)),
+				};
+				_availableBuffers.Enqueue(i);
+			}
+		}
+
 		// Reference to the memory manager and its GPU resources
 		ChunkMemoryManager MemoryManager {
-			get => ChunkMemoryManager.Instance;
+			get => _gameState.ChunkMemoryManager;
 		}
 
 		ComputeShader CompressionShader {
@@ -44,35 +70,6 @@ namespace Universe.Data.Chunk {
 
 		float GPUReadbackTimeoutSeconds {
 			get => EngineSettings.Instance.MaxGPUReadbackTimeout.Value;
-		}
-
-		public static ChunkCompressionManager Instance => FindFirstObjectByType<ChunkCompressionManager>();
-
-		class BufferSet {
-			public ComputeBuffer Input;
-			public ComputeBuffer CompressionOutput;
-			public ComputeBuffer DecompressionOutput;
-			public ComputeBuffer Metadata;
-		}
-
-		BufferSet[] _bufferPool;
-		Queue<int> _availableBuffers;
-		object _bufferPoolLock = new object();
-
-		void Start() {
-			int bufferPoolSize = EngineSettings.Instance.GPUCompressionBufferPoolSize.Value;
-			_bufferPool = new BufferSet[bufferPoolSize];
-			_availableBuffers = new Queue<int>(bufferPoolSize);
-
-			for(int i = 0; i < bufferPoolSize; i++) {
-				_bufferPool[i] = new BufferSet {
-					Input = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
-					CompressionOutput = new ComputeBuffer(32 * 32 * 32 * 2, sizeof(int)),
-					DecompressionOutput = new ComputeBuffer(32 * 32 * 32, sizeof(int)),
-					Metadata = new ComputeBuffer(4, sizeof(uint)),
-				};
-				_availableBuffers.Enqueue(i);
-			}
 		}
 
 		int AcquireBufferSet() {
@@ -101,9 +98,9 @@ namespace Universe.Data.Chunk {
 		}
 
 		/**
-		* Compresses a chunk and returns the compressed data.
-		* Note: This should only be called by ChunkMemoryManager. If you need to compress a chunk, use MemoryManager.CompressChunk() instead.
-		*/
+		 * Compresses a chunk and returns the compressed data.
+		 * Note: This should only be called by ChunkMemoryManager. If you need to compress a chunk, use MemoryManager.CompressChunk() instead.
+		 */
 		public async Task CompressChunk(long chunkID) {
 			int bufferIdx = AcquireBufferSet();
 			BufferSet buffers = _bufferPool[bufferIdx];
@@ -210,34 +207,34 @@ namespace Universe.Data.Chunk {
 				// Allocate space in compressed pool and update memory manager
 				// Reserve space atomically in the compressed pool (safe even if accessed elsewhere)
 				int offset;
-				int newHead = Interlocked.Add(ref MemoryManager._compressedPoolHead, totalCompressedBytes);
+				int newHead = Interlocked.Add(ref MemoryManager.compressedPoolHead, totalCompressedBytes);
 				offset = newHead - totalCompressedBytes;
 				// Defensive checks
 				if(offset < 0) {
-					Debug.LogWarning($"[CompressChunk] Compressed pool head negative ({MemoryManager._compressedPoolHead - totalCompressedBytes}), clamping to 0");
+					Debug.LogWarning($"[CompressChunk] Compressed pool head negative ({MemoryManager.compressedPoolHead - totalCompressedBytes}), clamping to 0");
 					offset = 0;
-					Interlocked.Exchange(ref MemoryManager._compressedPoolHead, totalCompressedBytes);
+					Interlocked.Exchange(ref MemoryManager.compressedPoolHead, totalCompressedBytes);
 				}
-				if(offset + totalCompressedBytes > MemoryManager._compressedPool.Length) {
+				if(offset + totalCompressedBytes > MemoryManager.CompressedPool.Length) {
 					// Roll back reservation
-					Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
+					Interlocked.Add(ref MemoryManager.compressedPoolHead, -totalCompressedBytes);
 					throw new Exception("Compressed pool out of memory");
 				}
 				// Copy to compressed pool with try/catch to provide clearer errors
-				var pool = MemoryManager._compressedPool;
+				var pool = MemoryManager.CompressedPool;
 				try {
 					for(int i = 0; i < totalCompressedBytes; i++) {
 						pool[offset + i] = compressedData[i];
 					}
 				} catch(Exception ex) {
 					// Roll back reservation on failure
-					Interlocked.Add(ref MemoryManager._compressedPoolHead, -totalCompressedBytes);
+					Interlocked.Add(ref MemoryManager.compressedPoolHead, -totalCompressedBytes);
 					Debug.LogError($"[CompressChunk] Failed copying compressed data into pool at offset={offset}, len={totalCompressedBytes}: {ex.Message}");
 					throw;
 				}
 
 				// Update allocation and header
-				if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
+				if(!MemoryManager.Allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
 					throw new Exception($"Chunk allocation not found for {chunkID}");
 				}
 				alloc.CompressedOffset = offset;
@@ -245,42 +242,41 @@ namespace Universe.Data.Chunk {
 				alloc.State = ChunkMemoryManager.ChunkState.Compressed;
 				int oldPoolIndex = alloc.PoolIndex;
 				alloc.PoolIndex = -1;
-				MemoryManager._allocations[chunkID] = alloc;
+				MemoryManager.Allocations[chunkID] = alloc;
 
-				if(MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+				if(MemoryManager.Headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
 					header.State = ChunkMemoryManager.ChunkState.Compressed;
 					header.CompressedSize = totalCompressedBytes;
 					header.IsDirty = false;
-					MemoryManager._headers[chunkID] = header;
+					MemoryManager.Headers[chunkID] = header;
 				} else {
 					throw new Exception($"Chunk header not found for {chunkID}");
 				}
 
 				// Free uncompressed slot
 				if(oldPoolIndex >= 0)
-					MemoryManager._freeUncompressedSlots.Enqueue(oldPoolIndex);
+					MemoryManager.FreeUncompressedSlots.Enqueue(oldPoolIndex);
 
 				// Return compressed chunk info
-				return;
 			} finally {
 				ReleaseBufferSet(bufferIdx);
 			}
 		}
 
 		/**
-		* Decompresses a chunk and returns the uncompressed data.
-		* Note: This should only be called by ChunkMemoryManager. If you need to decompress a chunk, use MemoryManager.DecompressChunk() instead.
-		*/
+		 * Decompresses a chunk and returns the uncompressed data.
+		 * Note: This should only be called by ChunkMemoryManager. If you need to decompress a chunk, use MemoryManager.DecompressChunk() instead.
+		 */
 		public async Task DecompressChunk(long chunkID) {
-			var sw = System.Diagnostics.Stopwatch.StartNew();
+			Stopwatch sw = Stopwatch.StartNew();
 			int bufferIdx = AcquireBufferSet();
-			var buffers = _bufferPool[bufferIdx];
+			BufferSet buffers = _bufferPool[bufferIdx];
 			try {
 				// Get allocation and header
-				if(!MemoryManager._allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
+				if(!MemoryManager.Allocations.TryGetValue(chunkID, out ChunkMemoryManager.ChunkAllocation alloc)) {
 					throw new Exception($"Chunk allocation not found for {chunkID}");
 				}
-				if(!MemoryManager._headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
+				if(!MemoryManager.Headers.TryGetValue(chunkID, out ChunkMemoryManager.ChunkHeader header)) {
 					throw new Exception($"Chunk header not found for {chunkID}");
 				}
 				if(alloc.State != ChunkMemoryManager.ChunkState.Compressed) {
@@ -292,13 +288,13 @@ namespace Universe.Data.Chunk {
 				int originalSize = header.OriginalSize;
 
 				// Allocate uncompressed slot
-				if(MemoryManager._freeUncompressedSlots.Count == 0)
+				if(MemoryManager.FreeUncompressedSlots.Count == 0)
 					throw new Exception("No free uncompressed slots available for decompression");
-				int poolIndex = MemoryManager._freeUncompressedSlots.Dequeue();
+				int poolIndex = MemoryManager.FreeUncompressedSlots.Dequeue();
 
 				// Prepare compressed input buffer (with offset table at start)
 				byte[] compressedData = new byte[compressedSize];
-				var pool = MemoryManager._compressedPool;
+				var pool = MemoryManager.CompressedPool;
 				for(int i = 0; i < compressedSize; i++) {
 					compressedData[i] = pool[compressedOffset + i];
 				}
@@ -312,7 +308,7 @@ namespace Universe.Data.Chunk {
 				// Prepare metadata buffer
 				int offsetTableBytes = 32 * 32 * 4;
 				if(compressedSize < offsetTableBytes) throw new Exception("Invalid compressedSize in pool");
-				int payloadSize = (compressedSize - offsetTableBytes);
+				int payloadSize = compressedSize - offsetTableBytes;
 				uint[] meta = { (uint)payloadSize, (uint)originalSize };
 				buffers.Metadata.SetData(meta);
 
@@ -380,7 +376,7 @@ namespace Universe.Data.Chunk {
 
 				// Write to uncompressed pool
 				int startIndex = poolIndex * 32 * 32 * 32;
-				var uncompressedPool = MemoryManager._uncompressedPool;
+				var uncompressedPool = MemoryManager.UncompressedPool;
 				for(int i = 0; i < decompressedInts.Length; i++) {
 					uncompressedPool[startIndex + i] = decompressedInts[i];
 				}
@@ -390,12 +386,12 @@ namespace Universe.Data.Chunk {
 				alloc.CompressedOffset = -1;
 				alloc.CompressedSize = 0;
 				alloc.State = ChunkMemoryManager.ChunkState.Uncompressed;
-				MemoryManager._allocations[chunkID] = alloc;
+				MemoryManager.Allocations[chunkID] = alloc;
 
 				header.State = ChunkMemoryManager.ChunkState.Uncompressed;
 				header.CompressedSize = 0;
 				header.IsDirty = false;
-				MemoryManager._headers[chunkID] = header;
+				MemoryManager.Headers[chunkID] = header;
 
 				sw.Stop();
 				if(sw.ElapsedMilliseconds > 100) {
@@ -405,6 +401,12 @@ namespace Universe.Data.Chunk {
 				ReleaseBufferSet(bufferIdx);
 			}
 		}
+
+		class BufferSet {
+			public ComputeBuffer CompressionOutput;
+			public ComputeBuffer DecompressionOutput;
+			public ComputeBuffer Input;
+			public ComputeBuffer Metadata;
+		}
 	}
 }
-

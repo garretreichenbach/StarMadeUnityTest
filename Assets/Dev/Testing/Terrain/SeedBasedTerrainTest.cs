@@ -23,7 +23,7 @@ namespace Dev.Testing.Terrain {
 		void GenerateTestAsteroid() {
 			GameObject asteroidGo = new GameObject($"Entity_Asteroid_{System.Guid.NewGuid()}");
 			Asteroid entity = asteroidGo.AddComponent<Asteroid>();
-			entity.Data = new GameEntity.GameEntityData {
+			entity.data = new GameEntity.GameEntityData {
 				EntityID = GameEntity.IDCounter++,
 				EntityType = GameEntityType.Asteroid,
 				EntityName = "Test Asteroid",

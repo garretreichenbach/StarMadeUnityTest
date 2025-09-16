@@ -15,5 +15,8 @@ namespace Networking {
 		public override void RequestInventory(string inventoryUid, Action<object> action) {
 
 		}
+
+		public override void Shutdown() {
+		}
 	}
 }

@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Settings;
@@ -8,6 +10,7 @@ using UnityEngine;
 using Universe.Data.Client.Player;
 using Universe.Data.GameEntity;
 using Universe.Data.Inventory;
+using Debug = UnityEngine.Debug;
 
 namespace Universe.World {
 	public enum DataType {
@@ -17,31 +20,32 @@ namespace Universe.World {
 	}
 
 	public class DatabaseManager {
-
-		SQLiteConnection _db;
-
-		float CommitInterval => ServerConfig.Instance.DatabaseAutoCommitInterval.Value;
-
-		bool _needsCommit;
-		float _commitTimer;
-		bool _initialized;
-
-		struct WriteRequest {
-			public string Path;
-			public byte[] Data;
-			public TaskCompletionSource<bool> Completion;
-		}
+		readonly CancellationTokenSource _writeCts = new CancellationTokenSource();
 
 		readonly ConcurrentQueue<WriteRequest> _writeQueue = new ConcurrentQueue<WriteRequest>();
-		readonly CancellationTokenSource _writeCts = new CancellationTokenSource();
-		Task _writeTask;
+		readonly Task _writeTask;
+		float _commitTimer;
 
-		public void Initialize(string dbPath) {
+		SQLiteConnection _db;
+		bool _initialized;
+
+		bool _needsCommit;
+
+		public DatabaseManager(string worldName) {
 			if(_initialized) return;
-			_db = new SQLiteConnection("Data Source=" + dbPath + ";Version=3;");
+			string worldPath = Path.Join(Application.persistentDataPath, "Database", worldName + ".db");
+			Debug.Log($"[DatabaseManager] Initializing database at {worldPath}");
+			if(!Directory.Exists(Path.GetDirectoryName(worldPath))) {
+				Directory.CreateDirectory(Path.GetDirectoryName(worldPath) ?? throw new InvalidOperationException("Directory.GetDirectoryName returned null"));
+			}
+			_db = new SQLiteConnection("Data Source=" + worldPath + ";Version=3;");
 			_db.CreateTable<GameEntity.GameEntityData>();
 			_writeTask = Task.Run(ProcessWriteQueue, _writeCts.Token);
 			_initialized = true;
+		}
+
+		float CommitInterval {
+			get => ServerConfig.Instance.DatabaseAutoCommitInterval.Value;
 		}
 
 		public void Load(DataType type, string uid, out object o) {
@@ -60,18 +64,21 @@ namespace Universe.World {
 						_needsCommit = true;
 					}
 					break;
+
 				case DataType.PlayerData:
 					if(o is PlayerData playerData) {
 						_db.InsertOrReplace(playerData);
 						_needsCommit = true;
 					}
 					break;
+
 				case DataType.InventoryData:
 					if(o is Inventory inventory) {
 						_db.InsertOrReplace(inventory);
 						_needsCommit = true;
 					}
 					break;
+
 				default:
 					throw new ArgumentOutOfRangeException(nameof(type), type, null);
 			}
@@ -91,14 +98,14 @@ namespace Universe.World {
 
 		async Task ProcessWriteQueue() {
 			while(!_writeCts.Token.IsCancellationRequested) {
-				if(_writeQueue.TryDequeue(out var req)) {
-					var sw = System.Diagnostics.Stopwatch.StartNew();
+				if(_writeQueue.TryDequeue(out WriteRequest req)) {
+					Stopwatch sw = Stopwatch.StartNew();
 					try {
-						string folderPath = System.IO.Path.GetDirectoryName(req.Path);
-						if(!System.IO.Directory.Exists(folderPath)) {
-							System.IO.Directory.CreateDirectory(folderPath);
+						string folderPath = Path.GetDirectoryName(req.Path);
+						if(!Directory.Exists(folderPath)) {
+							Directory.CreateDirectory(folderPath);
 						}
-						await System.IO.File.WriteAllBytesAsync(req.Path, req.Data);
+						await File.WriteAllBytesAsync(req.Path, req.Data);
 						req.Completion.SetResult(true);
 					} catch(Exception ex) {
 						Debug.LogError($"[WriteQueue] Failed to data to {req.Path}: {ex}");
@@ -108,6 +115,22 @@ namespace Universe.World {
 					await Task.Delay(10); // Avoid busy-wait
 				}
 			}
+		}
+
+		public void Shutdown() {
+			_db.Commit();
+			_needsCommit = false;
+			_writeCts.Cancel();
+			_writeTask.Wait();
+			_db?.Close();
+			_db = null;
+			_initialized = false;
+		}
+
+		struct WriteRequest {
+			public string Path;
+			public byte[] Data;
+			public TaskCompletionSource<bool> Completion;
 		}
 	}
 }

@@ -4,6 +4,7 @@ using Unity.VisualScripting.Dependencies.Sqlite;
 using UnityEditor;
 using UnityEngine;
 using Universe.Data.Chunk;
+using Universe.Data.Common;
 using Universe.World;
 
 namespace Universe.Data.GameEntity {
@@ -31,41 +32,43 @@ namespace Universe.Data.GameEntity {
 
 		public static int IDCounter;
 
+		GameState _gameState;
+
 		[Header("Entity Info")]
-		public string Uid => Data.Uid;
+		public string Uid => data.Uid;
 
-		public int EntityID => Data.EntityID;
+		public int EntityID => data.EntityID;
 
-		public GameEntityType Type => Data.EntityType;
+		public GameEntityType Type => data.EntityType;
 
 		public string Name {
-			get => Data.EntityName;
-			set => Data.EntityName = value;
+			get => data.EntityName;
+			set => data.EntityName = value;
 		}
 
 		public int FactionID {
-			get => Data.FactionID;
-			set => Data.FactionID = value;
+			get => data.FactionID;
+			set => data.FactionID = value;
 		}
 
 		public int SectorID {
-			get => Data.SectorID;
-			set => Data.SectorID = value;
+			get => data.SectorID;
+			set => data.SectorID = value;
 		}
 
 		public bool Loaded {
-			get => Data.ChunkLoaded;
-			set => Data.ChunkLoaded = value;
+			get => data.ChunkLoaded;
+			set => data.ChunkLoaded = value;
 		}
 
 		public int ChunkCount {
-			get => Data.ChunkCount;
-			set => Data.ChunkCount = value;
+			get => data.ChunkCount;
+			set => data.ChunkCount = value;
 		}
 
 		public Vector3Int ChunkDimensions {
-			get => new Vector3Int(Data.ChunkDimensions[0], Data.ChunkDimensions[1], Data.ChunkDimensions[2]);
-			set => Data.ChunkDimensions = new[] { value.x, value.y, value.z };
+			get => new Vector3Int(data.ChunkDimensions[0], data.ChunkDimensions[1], data.ChunkDimensions[2]);
+			set => data.ChunkDimensions = new[] { value.x, value.y, value.z };
 		}
 
 		public Vector3Int Sector {
@@ -86,7 +89,7 @@ namespace Universe.Data.GameEntity {
 		public int triangleCount;
 		public int vertexCount;
 
-		public GameEntityData Data;
+		public GameEntityData data;
 		public ChunkData[] Chunks = Array.Empty<ChunkData>();
 
 		bool _initialized;
@@ -107,16 +110,15 @@ namespace Universe.Data.GameEntity {
 
 		public async Task<bool> LoadChunkData() {
 			if(Loaded) {
-				Debug.LogWarning($"Entity {Name} is already loaded. Cannot load chunk data.");
+				Debug.LogWarning($"Entity {Uid} is already loaded. Cannot load chunk data.");
 				return false;
 			}
 			byte[] rawCompressedData = await EntityDatabaseManager.Instance.ReadChunkData(ChunkDataPath);
 			if(rawCompressedData == null || rawCompressedData.Length == 0) {
-				Debug.LogWarning($"No chunk data found for entity {Name} at path {ChunkDataPath}.");
+				Debug.LogWarning($"No chunk data found for entity {Uid} at path {ChunkDataPath}.");
 				return false;
 			}
-			_ = await ChunkMemoryManager.Instance.DecompressEntity(this, rawCompressedData);
-			// Do NOT call AllocateChunks here; decompression already fills Chunks array
+			_ = await _gameState.ChunkMemoryManager.DecompressEntity(this, rawCompressedData);
 			Loaded = true;
 			RequestMeshRebuild();
 			return true;
@@ -128,7 +130,7 @@ namespace Universe.Data.GameEntity {
 				return false;
 			}
 			var sw = System.Diagnostics.Stopwatch.StartNew();
-			byte[] compressedData = await ChunkMemoryManager.Instance.CompressEntity(this);
+			byte[] compressedData = await _gameState.ChunkMemoryManager.CompressEntity(this);
 			bool result = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
 			sw.Stop();
 			if(sw.ElapsedMilliseconds > 5000) {
@@ -148,7 +150,8 @@ namespace Universe.Data.GameEntity {
 			return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
 		}
 
-		void Initialize() {
+		void Initialize(GameState gameState) {
+			_gameState = gameState;
 			_meshFilter = gameObject.GetComponent<MeshFilter>();
 			if(_meshFilter == null) {
 				_meshFilter = gameObject.AddComponent<MeshFilter>();
@@ -165,10 +168,6 @@ namespace Universe.Data.GameEntity {
 		}
 
 		public void RebuildMesh() {
-			//TODO: THIS CAUSES A FREEZE ON THE MAIN THREAD WHEN CALLED!!! FIX THIS!!!
-			if(!_initialized) {
-				Initialize();
-			}
 			blockCount = 0;
 			triangleCount = 0;
 			vertexCount = 0;
@@ -181,12 +180,12 @@ namespace Universe.Data.GameEntity {
 			if(Chunks == null || Chunks.Length == 0) {
 				AllocateChunks(ChunkDimensions);
 			}
-			if(Data.ChunkCount == 0 || Chunks == null || Chunks.Length == 0) {
+			if(data.ChunkCount == 0 || Chunks == null || Chunks.Length == 0) {
 				Debug.LogError($"[GameEntity] RebuildMesh: Entity {Uid} is empty!");
 				return;
 			}
-			var combine = new CombineInstance[Data.ChunkCount];
-			for(int i = 0; i < Data.ChunkCount; i++) {
+			var combine = new CombineInstance[data.ChunkCount];
+			for(int i = 0; i < data.ChunkCount; i++) {
 				var chunk = GetChunkData(i);
 				if(chunk == null) {
 					Debug.LogError($"[GameEntity] RebuildMesh: Chunk {i} is null!");
@@ -228,12 +227,11 @@ namespace Universe.Data.GameEntity {
 			Loaded = true;
 
 			for(int i = 0; i < chunksTotal; i++) {
-				// Generate a unique chunkID for each chunk (entityID shifted left, plus index)
 				long chunkID = ((long)EntityID << 32) | (uint)i;
-				// Only allocate if not already present in memory manager
-				if(!ChunkMemoryManager.Instance._allocations.ContainsKey(chunkID)) {
-					ChunkMemoryManager.Instance.AllocateChunk(chunkID, EntityID, i);
-					Chunks[i] = new ChunkData(chunkID, ChunkMemoryManager.Instance._allocations[chunkID].PoolIndex);
+				ChunkMemoryManager memoryManager = _gameState.ChunkMemoryManager;
+				if(!memoryManager.Allocations.ContainsKey(chunkID)) {
+					memoryManager.AllocateChunk(chunkID, EntityID, i);
+					Chunks[i] = new ChunkData(chunkID, memoryManager.Allocations[chunkID].PoolIndex);
 				}
 			}
 		}

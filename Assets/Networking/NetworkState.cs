@@ -13,5 +13,7 @@ namespace Networking {
 	public abstract class NetworkState {
 
 		public abstract void RequestInventory(string inventoryUid, Action<object> action);
+
+		public abstract void Shutdown();
 	}
 }

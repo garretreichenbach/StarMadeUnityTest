@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using Universe.Data.Common;
 
 namespace Universe.Data.Chunk {
 	/**
@@ -37,6 +38,7 @@ namespace Universe.Data.Chunk {
 
 		public long _chunkID;
 		public long _seed;
+		GameState GameState => GameStateManager.GetCurrentState();
 
 		public static readonly long InvalidChunkID = -1;
 		public bool IsValid => _chunkID != InvalidChunkID;
@@ -51,11 +53,11 @@ namespace Universe.Data.Chunk {
 		}
 
 		public int GetBlockData(int index) {
-			return ChunkMemoryManager.Instance.GetRawData(_chunkID, index);
+			return GameState.ChunkMemoryManager.GetRawData(_chunkID, index);
 		}
 
 		public void SetBlockData(int index, int value) {
-			ChunkMemoryManager.Instance.SetRawData(_chunkID, index, value);
+			GameState.ChunkMemoryManager.SetRawData(_chunkID, index, value);
 		}
 
 		public short GetBlockType(int index) {

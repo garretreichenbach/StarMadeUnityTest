@@ -174,9 +174,9 @@ namespace Universe.World {
 				Debug.LogError($"Failed to load entity of type {data.EntityType} for entity ID {data.Uid}");
 				throw new System.Exception($"Failed to create entity of type {data.EntityType} for entity ID {data.Uid}");
 			}
-			entityComp.Data = data;
-			_activeEntities[data.Uid].Data = data;
-			entityComp.Data = data;
+			entityComp.data = data;
+			_activeEntities[data.Uid].data = data;
+			entityComp.data = data;
 			if(loadPhysical) {
 				_ = entityComp.LoadChunkData();
 			}
@@ -204,7 +204,7 @@ namespace Universe.World {
 						_activeEntities.Remove(entityUID);
 					}
 				}
-				_db.Update(entity.Data);
+				_db.Update(entity.data);
 				_needsCommit = true;
 			} else {
 				Debug.LogWarning($"Entity ID {entityUID} not found in active entities.");
@@ -270,7 +270,7 @@ namespace Universe.World {
 		* Adds a new entity to the database if it doesn't already exist.
 		*/
 		public void InsertEntity(GameEntity entity) {
-			_db.Insert(entity.Data);
+			_db.Insert(entity.data);
 			_needsCommit = true;
 			_activeEntities.Add(entity.Uid, entity);
 			Debug.Log($"Inserted entity {entity.Name} with UID {entity.Uid} into database.");
