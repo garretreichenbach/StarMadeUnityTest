@@ -147,10 +147,6 @@ namespace Universe.Data.Generation {
 		TerrainType TerrainType { get; }
 	}
 
-	/// <summary>
-	///     Settings for asteroid generation - matches your current TerrainTest parameters
-	/// </summary>
-	[Serializable]
 	public class AsteroidGenerationSettings : ITerrainGenerationSettings {
 
 		[Header("Asteroid Shape")]
@@ -168,9 +164,6 @@ namespace Universe.Data.Generation {
 			get => TerrainType.Asteroid;
 		}
 
-		/// <summary>
-		///     Create settings that match your current TerrainTest configuration
-		/// </summary>
 		public static AsteroidGenerationSettings CreateDefault(Vector3Int chunkDimensions) {
 			return new AsteroidGenerationSettings {
 				radius = Mathf.Min(chunkDimensions.x, Mathf.Min(chunkDimensions.y, chunkDimensions.z)) * IChunkData.ChunkSize / 2f - 10f,
@@ -185,7 +178,7 @@ namespace Universe.Data.Generation {
 	}
 
 	/// <summary>
-	///     Settings for planet generation (placeholder for future implementation)
+	///     Settings for planet generation (placeholder)
 	/// </summary>
 	[Serializable]
 	public class PlanetGenerationSettings : ITerrainGenerationSettings {

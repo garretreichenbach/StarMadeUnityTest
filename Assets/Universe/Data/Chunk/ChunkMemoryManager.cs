@@ -133,7 +133,7 @@ namespace Universe.Data.Chunk {
 
 		#region Memory Pool Configuration
 
-		// Memory pool sizes (configurable in inspector)
+		// Memory pool sizes
 		[Header("Memory Configuration")] [SerializeField]
 		int maxUncompressedChunks = 1024; // ~32MB for 1024 chunks
 
