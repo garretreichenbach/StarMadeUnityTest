@@ -3,10 +3,9 @@ using UnityEditor;
 using UnityEngine;
 using Universe.Data.Client;
 using Universe.Data.Client.MainMenu;
-using Universe.Data.Common;
 using Universe.Data.Server;
 
-namespace Universe.Data {
+namespace Universe.Data.Common {
 
 	[CustomEditor(typeof(GameStateManager))]
 	public class GameStateEditor : Editor {

@@ -40,7 +40,9 @@ namespace Universe.Data.Common {
 		public abstract ResourceManager ResourceManager { get; set; }
 
 		void Start() {
-			ResourceManager = new ResourceManager(this);
+			if(IsClient()) {
+				ResourceManager = new ResourceManager(this);
+			}
 		}
 	}
 

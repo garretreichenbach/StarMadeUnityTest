@@ -2,6 +2,7 @@ using Element;
 using Networking;
 using Settings;
 using UnityEngine;
+using Universe.Data.Chunk;
 using Universe.Data.Common;
 using Universe.Data.Common.Resource;
 using Universe.Data.Inventory;
@@ -55,6 +56,8 @@ namespace Universe.Data.Server {
 				ElementConfig = elementConfig,
 				ServerConfig = config,
 			};
+			ChunkMemoryManager = new ChunkMemoryManager(this);
+			_initialized = true;
 		}
 	}
 }

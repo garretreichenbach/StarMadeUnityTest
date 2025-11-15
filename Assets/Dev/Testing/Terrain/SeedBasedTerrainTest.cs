@@ -1,7 +1,9 @@
 using UnityEngine;
 using Universe.Data.Chunk;
+using Universe.Data.Client;
 using Universe.Data.GameEntity;
 using Universe.Data.Generation;
+using Universe.Data.Server;
 using Universe.World;
 
 namespace Dev.Testing.Terrain {
@@ -23,6 +25,7 @@ namespace Dev.Testing.Terrain {
 		void GenerateTestAsteroid() {
 			GameObject asteroidGo = new GameObject($"Entity_Asteroid_{System.Guid.NewGuid()}");
 			Asteroid entity = asteroidGo.AddComponent<Asteroid>();
+			entity.Initialize(GameClientState.Instance);
 			entity.data = new GameEntity.GameEntityData {
 				EntityID = GameEntity.IDCounter++,
 				EntityType = GameEntityType.Asteroid,
@@ -32,7 +35,6 @@ namespace Dev.Testing.Terrain {
 				ChunkLoaded = true,
 				Uid = asteroidGo.name,
 			};
-			EntityDatabaseManager.Instance.InsertEntity(entity);
 			entity.gameObject.transform.position = new Vector3(0, 0, 0);
 			entity.gameObject.transform.rotation = Quaternion.identity;
 			entity.gameObject.SetActive(true);
@@ -40,8 +42,8 @@ namespace Dev.Testing.Terrain {
 			entity.AllocateChunks(chunkDimensions);
 			SetupCrossChunkResolver(entity);
 
-			// Generate chunks using the new global memory system
-			GenerateChunksWithGlobalMemory(entity);
+			// Generate chunks using the global memory system
+			GenerateChunks(entity);
 
 			// Build the mesh
 			ChunkGenerationQueue chunkGenQueue = FindFirstObjectByType<ChunkGenerationQueue>();
@@ -52,9 +54,11 @@ namespace Dev.Testing.Terrain {
 				Debug.LogWarning("ChunkGenerationQueue not found - triggering immediate mesh rebuild");
 				entity.RequestMeshRebuild();
 			}
+
+			GameServerState.Instance.DatabaseManager.Write(DataType.GameEntity, entity);
 		}
 
-		void GenerateChunksWithGlobalMemory(GameEntity entity) {
+		void GenerateChunks(GameEntity entity) {
 			int chunksTotal = entity.Chunks.Length;
 
 			// Generate all chunks using the global memory system

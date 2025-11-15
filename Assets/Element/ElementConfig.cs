@@ -23,8 +23,8 @@ namespace Element {
 		public static ElementConfig Instance { get; private set; } = new ElementConfig();
 
 		public ElementConfig() {
-			BlockTypesPath = Path.Combine(Application.dataPath, "Element", "BlockTypes.properties");
-			BlockConfigPath = Path.Combine(Application.dataPath, "Element", "BlockConfig.xml");
+			BlockTypesPath = Path.Combine(Application.persistentDataPath, "Config", "BlockTypes.properties");
+			BlockConfigPath = Path.Combine(Application.persistentDataPath, "Config", "BlockConfig.xml");
 		}
 
 		/*[MenuItem("Tools/Regenerate Elements Enum")]

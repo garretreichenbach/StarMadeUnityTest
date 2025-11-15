@@ -8,6 +8,7 @@ namespace Universe.Data.Inventory {
 	public class InventoryController {
 
 		Dictionary<string, Inventory> _clientInventoryCache = new Dictionary<string, Inventory>();
+
 		public GameState GameState { get; private set; }
 
 		public InventoryController(GameState gameState) {
@@ -21,16 +22,16 @@ namespace Universe.Data.Inventory {
 				}
 				return RequestInventoryFromServer(inventoryUid);
 			}
-			((GameServerState) GameState).DatabaseManager.Load(DataType.InventoryData, inventoryUid, out object inventory);
-			return (Inventory) inventory;
+			return (Inventory)((GameServerState)GameState).DatabaseManager.Load(DataType.InventoryData, inventoryUid);
 		}
 
 		Inventory RequestInventoryFromServer(string inventoryUid) {
 			var tcs = new TaskCompletionSource<Inventory>();
-			GameState.NetworkState.RequestInventory(inventoryUid, (inv) => {
-				_clientInventoryCache[inventoryUid] = inv as Inventory;
-				tcs.SetResult(inv as Inventory);
-			});
+			GameState.NetworkState.RequestInventory(inventoryUid,
+				inv => {
+					_clientInventoryCache[inventoryUid] = inv as Inventory;
+					tcs.SetResult(inv as Inventory);
+				});
 			return tcs.Task.Result;
 		}
 	}

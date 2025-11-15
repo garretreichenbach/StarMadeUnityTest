@@ -48,12 +48,14 @@ namespace Universe.World {
 			get => ServerConfig.Instance.DatabaseAutoCommitInterval.Value;
 		}
 
-		public void Load(DataType type, string uid, out object o) {
-			o = type switch {
-				DataType.GameEntity => _db.Find<GameEntity.GameEntityData>(x => x.Uid == uid) is var data ? o = data : o = null,
-				DataType.PlayerData => _db.Find<PlayerData>(x => x.Uid == uid) is var pdata ? o = pdata : o = null,
+		public object Load(DataType type, string uid) {
+			object entity = type switch {
+				DataType.GameEntity => _db.Find<GameEntity.GameEntityData>(x => x.Uid == uid),
+				DataType.PlayerData => _db.Find<PlayerData>(x => x.Uid == uid),
 				_ => null,
 			};
+			Debug.Log($"Loaded entity {uid} of type {type} into scene");
+			return entity;
 		}
 
 		public void Write(DataType type, object o) {

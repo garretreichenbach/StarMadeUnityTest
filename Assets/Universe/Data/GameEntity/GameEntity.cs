@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Threading.Tasks;
 using Unity.VisualScripting.Dependencies.Sqlite;
 using UnityEditor;
@@ -6,6 +7,7 @@ using UnityEngine;
 using Universe.Data.Chunk;
 using Universe.Data.Common;
 using Universe.World;
+using Debug = UnityEngine.Debug;
 
 namespace Universe.Data.GameEntity {
 
@@ -14,16 +16,27 @@ namespace Universe.Data.GameEntity {
 		public override void OnInspectorGUI() {
 			DrawDefaultInspector();
 			if(GUILayout.Button("Rebuild Mesh")) {
-				(target as GameEntity)?.RequestMeshRebuild();
+				if(target is GameEntity entity) {
+					entity.RequestMeshRebuild();
+				}
 			}
 			if(GUILayout.Button("Load Chunk Data")) {
-				EntityDatabaseManager.Instance.LoadEntity(((GameEntity)target).Uid, true);
+				if(target is GameEntity entity) {
+					_ = entity.LoadChunkData();
+				}
 			}
 			if(GUILayout.Button("Unload Chunk Data")) {
-				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).Uid, true);
+				if(target is GameEntity entity) {
+					_ = entity.UnloadChunkData();
+				}
 			}
 			if(GUILayout.Button("Unload From Scene")) {
-				EntityDatabaseManager.Instance.UnloadEntity(((GameEntity)target).Uid);
+				if(target is GameEntity entity) {
+					if(entity.Loaded) {
+						_ = entity.UnloadChunkData();
+						DestroyImmediate(entity.gameObject);
+					}
+				}
 			}
 		}
 	}
@@ -129,7 +142,7 @@ namespace Universe.Data.GameEntity {
 				Debug.LogWarning($"Entity {Name} is not loaded. Cannot write chunk data.");
 				return false;
 			}
-			var sw = System.Diagnostics.Stopwatch.StartNew();
+			Stopwatch sw = Stopwatch.StartNew();
 			byte[] compressedData = await _gameState.ChunkMemoryManager.CompressEntity(this);
 			bool result = await EntityDatabaseManager.Instance.WriteChunkData(ChunkDataPath, compressedData);
 			sw.Stop();
@@ -137,6 +150,26 @@ namespace Universe.Data.GameEntity {
 				Debug.LogWarning($"[GameEntity] WriteChunkData for entity {Uid} took {sw.ElapsedMilliseconds} ms - consider optimizing storage or chunk size.");
 			}
 			return result;
+		}
+
+		/**
+		* Unloads the chunk data from memory and clears the mesh. Does not actually remove the entity object itself from the scene.
+		*/
+		public async Task<bool> UnloadChunkData() {
+			if(!Loaded) {
+				Debug.LogWarning($"Entity {Uid} is not loaded. Cannot unload chunk data.");
+				return false;
+			}
+			_ = await WriteChunkData();
+			ClearMesh();
+			DeallocateChunks(ChunkDimensions);
+			return true;
+		}
+
+		public void ClearMesh() {
+			_meshFilter.mesh.Clear();
+			_meshFilter.mesh.RecalculateBounds();
+			_meshCollider.sharedMesh = null;
 		}
 
 		public IChunkData GetChunkData(long index) {
@@ -150,7 +183,7 @@ namespace Universe.Data.GameEntity {
 			return new Vector3(chunkX * IChunkData.ChunkSize, chunkY * IChunkData.ChunkSize, chunkZ * IChunkData.ChunkSize);
 		}
 
-		void Initialize(GameState gameState) {
+		public void Initialize(GameState gameState) {
 			_gameState = gameState;
 			_meshFilter = gameObject.GetComponent<MeshFilter>();
 			if(_meshFilter == null) {
@@ -234,6 +267,21 @@ namespace Universe.Data.GameEntity {
 					Chunks[i] = new ChunkData(chunkID, memoryManager.Allocations[chunkID].PoolIndex);
 				}
 			}
+		}
+
+		public void DeallocateChunks(Vector3Int chunkDimensions) {
+			int chunksTotal = chunkDimensions.x * chunkDimensions.y * chunkDimensions.z;
+			ChunkCount = 0;
+			Loaded = false;
+
+			ChunkMemoryManager memoryManager = _gameState.ChunkMemoryManager;
+			for(int i = 0; i < chunksTotal; i++) {
+				long chunkID = ((long)EntityID << 32) | (uint)i;
+				if(memoryManager.Allocations.ContainsKey(chunkID)) {
+					memoryManager.DeallocateChunk(chunkID);
+				}
+			}
+			Chunks = Array.Empty<ChunkData>();
 		}
 
 		[Serializable]
