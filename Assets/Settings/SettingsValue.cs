@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 
 namespace Settings {
-	public interface ISettingsValue<T> {
+	public interface ISettingsValue<out T> {
 		public string Name { get; }
 
 		public string Description { get; }

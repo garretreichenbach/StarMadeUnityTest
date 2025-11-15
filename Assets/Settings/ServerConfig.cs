@@ -1,8 +1,9 @@
 ﻿using System;
 using System.IO;
+using System.Reflection;
+using Unity.Serialization.Json;
 using Unity.VisualScripting;
 using UnityEngine;
-using Universe.Data;
 
 namespace Settings {
 	[Serializable]
@@ -98,24 +99,24 @@ namespace Settings {
 			SaveSettings();
 		}
 
-		object ToJson() {
-			return new {
-				InstantCommit = InstantCommit.Value,
-				DatabaseAutoCommitInterval = DatabaseAutoCommitInterval.Value,
-				SectorSize = SectorSize.Value,
-				SystemSize = SystemSize.Value,
-				GalaxyRadius = GalaxyRadius.Value,
-			};
+		string ToJson() {
+			JsonObject obj = new JsonObject();
+			foreach(var setting in GetAllSettings()) {
+				obj[setting.Name] = setting.Value;
+			}
+			return obj.ToString();
 		}
 
 		void FromJson(object json) {
 			var dict = json as System.Collections.Generic.Dictionary<string, object>;
-			if(dict == null) return;
-			if(dict.ContainsKey("InstantCommit")) InstantCommit.SetValue(Convert.ToBoolean(dict["InstantCommit"]));
-			if(dict.ContainsKey("DatabaseAutoCommitInterval")) DatabaseAutoCommitInterval.SetValue(Convert.ToSingle(dict["DatabaseAutoCommitInterval"]));
-			if(dict.ContainsKey("SectorSize")) SectorSize.SetValue(Convert.ToInt32(dict["SectorSize"]));
-			if(dict.ContainsKey("SystemSize")) SystemSize.SetValue(Convert.ToInt32(dict["SystemSize"]));
-			if(dict.ContainsKey("GalaxyRadius")) GalaxyRadius.SetValue(Convert.ToInt32(dict["GalaxyRadius"]));
+			if(dict == null) {
+				return;
+			}
+			foreach(var setting in GetAllSettings()) {
+				if(dict.ContainsKey(setting.Name)) {
+					setting.Value = Convert.ChangeType(dict[setting.Name], setting.Value.GetType());
+				}
+			}
 		}
 
 		public ServerConfig LoadServerConfig() {
@@ -128,11 +129,15 @@ namespace Settings {
 		}
 
 		public void Read(BinaryReader reader) {
-			InstantCommit.SetValue(reader.ReadBoolean());
-			DatabaseAutoCommitInterval.SetValue(reader.ReadSingle());
-			SectorSize.SetValue(reader.ReadInt32());
-			SystemSize.SetValue(reader.ReadInt32());
-			GalaxyRadius.SetValue(reader.ReadInt32());
+
+		}
+
+		public void Write(BinaryWriter writer) {
+
+		}
+
+		public FieldInfo[] GetAllSettings() {
+			return GetType().GetFields(BindingFlags.Public | BindingFlags.Instance);
 		}
 	}
 }

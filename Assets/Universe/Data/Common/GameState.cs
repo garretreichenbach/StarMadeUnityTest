@@ -57,6 +57,7 @@ namespace Universe.Data.Common {
 		public string WorldName;
 		public string ServerIP;
 		public int ServerPort;
+		public EngineSettings EngineSettings;
 		public ElementConfig ElementConfig;
 		public ServerConfig ServerConfig;
 
@@ -71,6 +72,8 @@ namespace Universe.Data.Common {
 					WorldName = reader.ReadString();
 					ServerIP = reader.ReadString();
 					ServerPort = reader.ReadInt32();
+					EngineSettings = new EngineSettings();
+					EngineSettings.Read(reader);
 					ElementConfig = new ElementConfig();
 					ElementConfig.Read(reader);
 					ServerConfig = new ServerConfig();

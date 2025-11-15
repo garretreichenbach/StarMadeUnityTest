@@ -32,16 +32,39 @@ namespace Universe.World {
 		bool _needsCommit;
 
 		public DatabaseManager(string worldName) {
-			if(_initialized) return;
-			string worldPath = Path.Join(Application.persistentDataPath, "Database", worldName + ".db");
-			Debug.Log($"[DatabaseManager] Initializing database at {worldPath}");
-			if(!Directory.Exists(Path.GetDirectoryName(worldPath))) {
-				Directory.CreateDirectory(Path.GetDirectoryName(worldPath) ?? throw new InvalidOperationException("Directory.GetDirectoryName returned null"));
+			if(_initialized) {
+				return;
 			}
-			_db = new SQLiteConnection("Data Source=" + worldPath + ";Version=3;");
-			_db.CreateTable<GameEntity.GameEntityData>();
-			_writeTask = Task.Run(ProcessWriteQueue, _writeCts.Token);
-			_initialized = true;
+
+			try {
+				string worldPath = Path.Combine(Application.persistentDataPath, "Database", worldName, worldName + ".db");
+				Debug.Log($"[DatabaseManager] Initializing database at {worldPath}");
+
+				// Ensure the directory exists
+				string directoryPath = Path.GetDirectoryName(worldPath);
+				if (string.IsNullOrEmpty(directoryPath)) {
+					throw new InvalidOperationException("Unable to determine directory path for database");
+				}
+
+				if (!Directory.Exists(directoryPath)) {
+					Debug.Log($"[DatabaseManager] Creating directory: {directoryPath}");
+					Directory.CreateDirectory(directoryPath);
+				}
+
+				// Create the SQLite connection (SQLite will create the file if it doesn't exist)
+				Debug.Log($"[DatabaseManager] Opening database connection to: {worldPath}");
+
+				_db = new SQLiteConnection(worldPath);
+				_db.CreateTable<GameEntity.GameEntityData>();
+				_writeTask = Task.Run(ProcessWriteQueue, _writeCts.Token);
+				_initialized = true;
+
+				Debug.Log("[DatabaseManager] Database initialized successfully");
+			} catch (Exception ex) {
+				Debug.LogError($"[DatabaseManager] Failed to initialize database: {ex.Message}");
+				Debug.LogError($"[DatabaseManager] Stack trace: {ex.StackTrace}");
+				throw;
+			}
 		}
 
 		float CommitInterval {

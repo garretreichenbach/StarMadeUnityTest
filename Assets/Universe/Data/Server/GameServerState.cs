@@ -44,6 +44,8 @@ namespace Universe.Data.Server {
 			Debug.Log("Initializing GameServerState");
 			Instance = this;
 			NetworkState = new ServerNetworkState();
+			EngineSettings engineSettings = new EngineSettings();
+			engineSettings.LoadSettings();
 			ElementConfig elementConfig = new ElementConfig();
 			elementConfig.LoadElementConfig();
 			ServerConfig config = new ServerConfig();

@@ -1,6 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
-using Dev;
+using System.Linq;
+using System.Reflection;
+using Unity.Serialization.Json;
 using Unity.VisualScripting;
 using UnityEngine;
 
@@ -9,43 +12,175 @@ namespace Settings {
 	* Serializable settings for the game engine.
 	*/
 	[Serializable]
-	public class EngineSettings : MonoBehaviour {
+	public class EngineSettings {
 		string _settingsFilePath;
+
+		#region Dev Settings
+
+		[Header("Dev Settings")]
+
+		#endregion
+
+		public static ServerConfig Instance { get; private set; } = new ServerConfig();
+
+		/**
+		* Loads the settings from the config file.
+		*/
+		public void LoadSettings() {
+			if(File.Exists(_settingsFilePath)) {
+				try {
+					string json = File.ReadAllText(_settingsFilePath);
+					FromJson(JsonUtility.FromJson<object>(json));
+					Debug.Log("Settings loaded from " + _settingsFilePath);
+				} catch(Exception e) {
+					Debug.LogWarning("Failed to load settings from " + _settingsFilePath + ": " + e.Message);
+					SetDefaults();
+				}
+			} else {
+				Debug.LogWarning("Settings file not found at " + _settingsFilePath + ". Using default settings.");
+				SetDefaults();
+			}
+		}
+
+		/**
+		* Saves the current settings to the config file.
+		*/
+		public void SaveSettings() {
+			string json = JsonUtility.ToJson(ToJson(), true);
+			File.WriteAllText(_settingsFilePath, json);
+			Debug.Log("Settings saved to " + _settingsFilePath);
+		}
+
+		string ToJson() {
+			JsonObject obj = new JsonObject();
+			foreach(FieldInfo setting in GetAllSettings()) {
+				PropertyInfo nameProperty = setting.GetType().GetProperty("Name");
+				PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+				if(nameProperty != null && valueProperty != null) {
+					string name = nameProperty.GetValue(setting) as string;
+					object value = valueProperty.GetValue(setting);
+					if(name != null) {
+						obj[name] = value;
+					}
+				}
+			}
+			return obj.ToString();
+		}
+
+		void FromJson(object json) {
+			var dict = json as Dictionary<string, object>;
+			if(dict == null) {
+				return;
+			}
+
+			foreach(FieldInfo field in GetAllSettings()) {
+				Type fieldType = field.FieldType;
+				// Check if the field type implements ISettingsValue<T> for any T
+				if(fieldType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISettingsValue<>))) {
+					object setting = field.GetValue(this);
+					if(setting != null) {
+						PropertyInfo nameProperty = setting.GetType().GetProperty("Name");
+						PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+						if(nameProperty != null && valueProperty != null) {
+							string name = nameProperty.GetValue(setting) as string;
+							if(name != null && dict.ContainsKey(name)) {
+								Type settingType = setting.GetType();
+								object newValue = null;
+
+								if(settingType == typeof(IntSettingsValue) || settingType == typeof(IntOptionsSettingsValue)) {
+									newValue = Convert.ToInt32(dict[name]);
+								} else if(settingType == typeof(FloatSettingsValue) || settingType == typeof(FloatOptionsSettingsValue)) {
+									newValue = Convert.ToSingle(dict[name]);
+								} else if(settingType == typeof(BoolSettingsValue)) {
+									newValue = Convert.ToBoolean(dict[name]);
+								}
+
+								if(newValue != null) {
+									// Set the value on the copy
+									valueProperty.SetValue(setting, newValue);
+									// Set the modified struct back to the field
+									field.SetValue(this, setting);
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
+		/**
+		* Resets all settings to their default values and saves them.
+		*/
+		public void SetDefaults() {
+			foreach(FieldInfo field in GetAllSettings()) {
+				Type fieldType = field.FieldType;
+				// Check if the field type implements ISettingsValue<T> for any T
+				if(fieldType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISettingsValue<>))) {
+					object setting = field.GetValue(this);
+					if(setting != null) {
+						PropertyInfo defaultValueProperty = setting.GetType().GetProperty("DefaultValue");
+						PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+						if(defaultValueProperty != null && valueProperty != null) {
+							object defaultValue = defaultValueProperty.GetValue(setting);
+							valueProperty.SetValue(setting, defaultValue);
+							// Set the modified struct back to the field
+							field.SetValue(this, setting);
+						}
+					}
+				}
+			}
+			SaveSettings();
+		}
+
+		public void Read(BinaryReader reader) {
+			string json = reader.ReadString();
+			FromJson(JsonUtility.FromJson<object>(json));
+			Debug.Log("Settings loaded from binary stream");
+		}
+
+		public void Write(BinaryWriter writer) {
+			string json = ToJson();
+			writer.Write(json);
+			Debug.Log("Settings written to binary stream");
+		}
+
+		/**
+		* Returns all Settings from this class using reflection.
+		*/
+		public FieldInfo[] GetAllSettings() {
+			return GetType().GetFields(BindingFlags.Public | BindingFlags.Instance);
+		}
 
 		#region Performance Settings
 
 		[Header("Performance Settings")]
 		[InspectorLabel("Max Block Modifications Per Frame")]
 		[Tooltip("Maximum number of block modifications to process per frame from the BlockModificationQueue.")]
-		public IntSettingsValue MaxBlockModificationsPerFrame = new IntSettingsValue("Max Block Modifications Per Frame",
-			"Maximum number of block modifications to process per frame from the BlockModificationQueue.", 128, 1, 1000, true);
+		public IntSettingsValue MaxBlockModificationsPerFrame = new IntSettingsValue("Max Block Modifications Per Frame", "Maximum number of block modifications to process per frame from the BlockModificationQueue.", 128, 1, 1000, true);
 
 		[InspectorLabel("GPU Readback Timeout")]
 		[Tooltip("Maximum time in seconds to wait for GPU readback to complete before timing out.")]
-		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout",
-			"Maximum time in seconds to wait for GPU readback to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
+		public FloatSettingsValue MaxGPUReadbackTimeout = new FloatSettingsValue("GPU Readback Timeout", "Maximum time in seconds to wait for GPU readback to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
 
 		[InspectorLabel("Max Chunk Operation Wait Time")]
 		[Tooltip("Maximum time in seconds to wait for chunk operations to complete before timing out.")]
-		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time",
-			"Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
+		public FloatSettingsValue MaxChunkOperationWaitTime = new FloatSettingsValue("Max ChunkOperation Wait Time", "Maximum time in seconds to wait for chunk operations to complete before timing out.", 5.0f, 0.1f, 30.0f, true);
 
 		[InspectorLabel("Max Entity Rebuilds Per Frame")]
 		[Tooltip("Maximum number of entity mesh rebuilds to perform per frame.")]
-		public IntSettingsValue MaxEntityRebuildsPerFrame = new IntSettingsValue("Max Entity Rebuilds Per Frame",
-			"Maximum number of entity mesh rebuilds to perform per frame.", 5, 1, 10, true);
+		public IntSettingsValue MaxEntityRebuildsPerFrame = new IntSettingsValue("Max Entity Rebuilds Per Frame", "Maximum number of entity mesh rebuilds to perform per frame.", 5, 1, 10, true);
 
 		[InspectorLabel("GPU Compression Buffer Pool Size")]
 		[Tooltip("Number of buffers to allocate for GPU compression tasks.")]
-		public IntOptionsSettingsValue GPUCompressionBufferPoolSize = new IntOptionsSettingsValue("GPU Compression Buffer Pool Size",
-			"Number of buffers to allocate for GPU compression tasks.", 4, new[] { 1, 2, 4, 8, 16 }, true);
+		public IntOptionsSettingsValue GPUCompressionBufferPoolSize = new IntOptionsSettingsValue("GPU Compression Buffer Pool Size", "Number of buffers to allocate for GPU compression tasks.", 4, new[] { 1, 2, 4, 8, 16 }, true);
 
 		[InspectorLabel("GPU Compression Batch Size")]
 		[Tooltip("Number of chunks to process per GPU compression/decompression batch.")]
 		public IntOptionsSettingsValue GPUCompressionBatchSize = new IntOptionsSettingsValue("GPU Compression Batch Size",
 			"Number of chunks to process per GPU compression/decompression batch.",
 			4, // default
-			new[] { 1, 2, 4, 8, 16 }, true);
+			new[] { 1, 2, 4, 8, 16 },
+			true);
 
 		#endregion
 
@@ -81,110 +216,5 @@ namespace Settings {
 
 		#endregion
 
-		#region Dev Settings
-
-		[Header("Dev Settings")]
-		[InspectorLabel("Stats Overlay Mode")]
-		[Tooltip("Set the stats overlay mode.")]
-		public EnumSettingsValue<StatsDisplay.DisplayMode> StatsOverlayMode = new EnumSettingsValue<StatsDisplay.DisplayMode>("Stats Overlay Mode",
-			"Set the stats overlay mode.",
-			StatsDisplay.DisplayMode.FPS | StatsDisplay.DisplayMode.Ping,
-			false,
-			new ISettingsChangeListener[] {
-				new SettingsChangeListener<StatsDisplay.DisplayMode>(value => {
-					StatsDisplay statsDisplay = FindFirstObjectByType<StatsDisplay>();
-					if(statsDisplay != null) {
-						statsDisplay.enabled = value != StatsDisplay.DisplayMode.None;
-						Debug.Log($"Stats Overlay Mode set to {value}");
-					}
-				}),
-			});
-
-		#endregion
-
-		public static EngineSettings Instance { get; private set; }
-
-		void Awake() {
-			//Todo: Dont call this in awake, we need a proper initialization order
-			Instance = this;
-			if(!Directory.Exists(Path.Combine(Application.persistentDataPath, "Config"))) {
-				Directory.CreateDirectory(Path.Combine(Application.persistentDataPath, "Config"));
-			}
-			_settingsFilePath = Path.Combine(Application.persistentDataPath, "Config/Settings.json");
-			LoadSettings();
-		}
-
-		/**
-		* Loads the settings from the config file.
-		*/
-		public void LoadSettings() {
-			if(File.Exists(_settingsFilePath)) {
-				try {
-					string json = File.ReadAllText(_settingsFilePath);
-					FromJson(JsonUtility.FromJson<object>(json));
-					Debug.Log("Settings loaded from " + _settingsFilePath);
-				} catch(Exception e) {
-					Debug.LogWarning("Failed to load settings from " + _settingsFilePath + ": " + e.Message);
-					SetDefaults();
-				}
-			} else {
-				Debug.LogWarning("Settings file not found at " + _settingsFilePath + ". Using default settings.");
-				SetDefaults();
-			}
-
-			// Apply settings
-			FPSLimit.SetValue(FPSLimit.Value);
-			VSyncMode.SetValue(VSyncMode.Value);
-		}
-
-		/**
-		* Saves the current settings to the config file.
-		*/
-		public void SaveSettings() {
-			string json = JsonUtility.ToJson(ToJson(), true);
-			File.WriteAllText(_settingsFilePath, json);
-			Debug.Log("Settings saved to " + _settingsFilePath);
-		}
-
-		object ToJson() {
-			return new {
-				MaxGPUReadbackTimeout = MaxGPUReadbackTimeout.Value,
-				MaxChunkOperationWaitTime = MaxChunkOperationWaitTime.Value,
-				MaxEntityRebuildsPerFrame = MaxEntityRebuildsPerFrame.Value,
-				FPSLimit = FPSLimit.Value,
-				VSyncMode = VSyncMode.Value,
-				StatsOverlayMode = StatsOverlayMode.Value,
-				GPUCompressionBufferPoolSize = GPUCompressionBufferPoolSize.Value,
-				GPUCompressionBatchSize = GPUCompressionBatchSize.Value
-			};
-		}
-
-		void FromJson(object json) {
-			var dict = json as System.Collections.Generic.Dictionary<string, object>;
-			if(dict == null) return;
-			if(dict.ContainsKey("MaxGPUReadbackTimeout")) MaxGPUReadbackTimeout.SetValue(Convert.ToSingle(dict["MaxGPUReadbackTimeout"]));
-			if(dict.ContainsKey("MaxChunkOperationWaitTime")) MaxChunkOperationWaitTime.SetValue(Convert.ToSingle(dict["MaxChunkOperationWaitTime"]));
-			if(dict.ContainsKey("MaxEntityRebuildsPerFrame")) MaxEntityRebuildsPerFrame.SetValue(Convert.ToInt32(dict["MaxEntityRebuildsPerFrame"]));
-			if(dict.ContainsKey("FPSLimit")) FPSLimit.SetValue(Convert.ToInt32(dict["FPSLimit"]));
-			if(dict.ContainsKey("VSyncMode")) VSyncMode.SetValue(Convert.ToInt32(dict["VSyncMode"]));
-			if(dict.ContainsKey("StatsOverlayMode")) StatsOverlayMode.SetValue((StatsDisplay.DisplayMode)Enum.Parse(typeof(StatsDisplay.DisplayMode), dict["StatsOverlayMode"].ToString()));
-			if(dict.ContainsKey("GPUCompressionBufferPoolSize")) GPUCompressionBufferPoolSize.SetValue(Convert.ToInt32(dict["GPUCompressionBufferPoolSize"]));
-			if(dict.ContainsKey("GPUCompressionBatchSize")) GPUCompressionBatchSize.SetValue(Convert.ToInt32(dict["GPUCompressionBatchSize"]));
-		}
-
-		/**
-		* Resets all settings to their default values and saves them.
-		*/
-		public void SetDefaults() {
-			FPSLimit.SetValue(FPSLimit.DefaultValue);
-			VSyncMode.SetValue(VSyncMode.DefaultValue);
-			StatsOverlayMode.SetValue(StatsOverlayMode.DefaultValue);
-			GPUCompressionBufferPoolSize.SetValue(GPUCompressionBufferPoolSize.DefaultValue);
-			GPUCompressionBatchSize.SetValue(GPUCompressionBatchSize.DefaultValue);
-			MaxGPUReadbackTimeout.SetValue(MaxGPUReadbackTimeout.DefaultValue);
-			MaxChunkOperationWaitTime.SetValue(MaxChunkOperationWaitTime.DefaultValue);
-			MaxEntityRebuildsPerFrame.SetValue(MaxEntityRebuildsPerFrame.DefaultValue);
-			SaveSettings();
-		}
 	}
 }
