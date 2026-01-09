@@ -21,7 +21,7 @@ namespace Settings {
 
 		#endregion
 
-		public static ServerConfig Instance { get; private set; } = new ServerConfig();
+		public static EngineSettings Instance { get; private set; } = new EngineSettings();
 
 		/**
 		* Loads the settings from the config file.
@@ -82,8 +82,7 @@ namespace Settings {
 						PropertyInfo nameProperty = setting.GetType().GetProperty("Name");
 						PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
 						if(nameProperty != null && valueProperty != null) {
-							string name = nameProperty.GetValue(setting) as string;
-							if(name != null && dict.ContainsKey(name)) {
+							if(nameProperty.GetValue(setting) is string name && dict.ContainsKey(name)) {
 								Type settingType = setting.GetType();
 								object newValue = null;
 
@@ -215,6 +214,5 @@ namespace Settings {
 			});
 
 		#endregion
-
 	}
 }

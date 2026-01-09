@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using Unity.Serialization.Json;
 using Unity.VisualScripting;
@@ -91,30 +93,78 @@ namespace Settings {
 		* Resets all settings to their default values and saves them.
 		*/
 		public void SetDefaults() {
-			InstantCommit.SetValue(InstantCommit.DefaultValue);
-			DatabaseAutoCommitInterval.SetValue(DatabaseAutoCommitInterval.DefaultValue);
-			SectorSize.SetValue(SectorSize.DefaultValue);
-			SystemSize.SetValue(SystemSize.DefaultValue);
-			GalaxyRadius.SetValue(GalaxyRadius.DefaultValue);
+			foreach(FieldInfo field in GetAllSettings()) {
+				Type fieldType = field.FieldType;
+				// Check if the field type implements ISettingsValue<T> for any T
+				if(fieldType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISettingsValue<>))) {
+					object setting = field.GetValue(this);
+					if(setting != null) {
+						PropertyInfo defaultValueProperty = setting.GetType().GetProperty("DefaultValue");
+						PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+						if(defaultValueProperty != null && valueProperty != null) {
+							object defaultValue = defaultValueProperty.GetValue(setting);
+							valueProperty.SetValue(setting, defaultValue);
+							// Set the modified struct back to the field
+							field.SetValue(this, setting);
+						}
+					}
+				}
+			}
 			SaveSettings();
 		}
 
 		string ToJson() {
 			JsonObject obj = new JsonObject();
-			foreach(var setting in GetAllSettings()) {
-				obj[setting.Name] = setting.Value;
+			foreach(FieldInfo setting in GetAllSettings()) {
+				PropertyInfo nameProperty = setting.GetType().GetProperty("Name");
+				PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+				if(nameProperty != null && valueProperty != null) {
+					string name = nameProperty.GetValue(setting) as string;
+					object value = valueProperty.GetValue(setting);
+					if(name != null) {
+						obj[name] = value;
+					}
+				}
 			}
 			return obj.ToString();
 		}
 
 		void FromJson(object json) {
-			var dict = json as System.Collections.Generic.Dictionary<string, object>;
+			var dict = json as Dictionary<string, object>;
 			if(dict == null) {
 				return;
 			}
-			foreach(var setting in GetAllSettings()) {
-				if(dict.ContainsKey(setting.Name)) {
-					setting.Value = Convert.ChangeType(dict[setting.Name], setting.Value.GetType());
+
+			foreach(FieldInfo field in GetAllSettings()) {
+				Type fieldType = field.FieldType;
+				// Check if the field type implements ISettingsValue<T> for any T
+				if(fieldType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(ISettingsValue<>))) {
+					object setting = field.GetValue(this);
+					if(setting != null) {
+						PropertyInfo nameProperty = setting.GetType().GetProperty("Name");
+						PropertyInfo valueProperty = setting.GetType().GetProperty("Value");
+						if(nameProperty != null && valueProperty != null) {
+							if(nameProperty.GetValue(setting) is string name && dict.ContainsKey(name)) {
+								Type settingType = setting.GetType();
+								object newValue = null;
+
+								if(settingType == typeof(IntSettingsValue) || settingType == typeof(IntOptionsSettingsValue)) {
+									newValue = Convert.ToInt32(dict[name]);
+								} else if(settingType == typeof(FloatSettingsValue) || settingType == typeof(FloatOptionsSettingsValue)) {
+									newValue = Convert.ToSingle(dict[name]);
+								} else if(settingType == typeof(BoolSettingsValue)) {
+									newValue = Convert.ToBoolean(dict[name]);
+								}
+
+								if(newValue != null) {
+									// Set the value on the copy
+									valueProperty.SetValue(setting, newValue);
+									// Set the modified struct back to the field
+									field.SetValue(this, setting);
+								}
+							}
+						}
+					}
 				}
 			}
 		}
@@ -129,11 +179,15 @@ namespace Settings {
 		}
 
 		public void Read(BinaryReader reader) {
-
+			string json = reader.ReadString();
+			FromJson(JsonUtility.FromJson<object>(json));
+			Debug.Log("Settings loaded from binary stream");
 		}
 
 		public void Write(BinaryWriter writer) {
-
+			string json = ToJson();
+			writer.Write(json);
+			Debug.Log("Settings written to binary stream");
 		}
 
 		public FieldInfo[] GetAllSettings() {
